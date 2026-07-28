@@ -81,11 +81,21 @@ if [[ "$(id -u)" -ne 0 ]]; then
   SUDO="sudo"
 fi
 
-# Always needed to switch to the 'postgres' OS user for peer auth — this is
-# an identity switch, not a privilege escalation, so it's required even when
-# already running as root (unlike $SUDO above, which becomes a no-op there).
-command -v sudo >/dev/null 2>&1 || die "sudo is required (even as root) to run psql as the postgres OS user."
-PG_SUDO="sudo -u postgres"
+# Switching to the 'postgres' OS user for peer auth is an identity change,
+# not a privilege escalation, so it's needed even when already running as
+# root — but it must NOT depend on the separate `sudo` package being
+# installed, which many minimal/root-only server images don't ship (you're
+# already root, so there's never a reason to have installed it). `runuser`
+# is part of util-linux and is present on essentially every real Linux
+# server, root or not, so use that to switch identity instead; only fall
+# back to `sudo -u postgres` (re-using the already-validated $SUDO) when
+# not root, matching the check above.
+if [[ "$(id -u)" -eq 0 ]]; then
+  command -v runuser >/dev/null 2>&1 || die "runuser is required (part of util-linux) to run psql as the postgres OS user."
+  PG_SUDO="runuser -u postgres --"
+else
+  PG_SUDO="sudo -u postgres"
+fi
 
 # ── 0. Reconcile against an existing deploy of this checkout ─────────────
 # .env files are only ever generated once (see setup_env) and never rewritten,
