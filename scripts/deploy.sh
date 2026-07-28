@@ -33,6 +33,14 @@
 
 set -euo pipefail
 
+# Under `set -e`, a failing command normally just exits the script with
+# whatever (possibly nothing) that command itself printed — which is how
+# this script has twice now failed with zero visible output on unusual
+# server images. This trap guarantees that can't happen again: any command
+# that fails prints the exact line number and command text before exiting,
+# no matter what the failure actually is.
+trap 'echo "✗ deploy.sh failed at line $LINENO: $BASH_COMMAND" >&2' ERR
+
 # ── Args ─────────────────────────────────────────────────────────────────
 MODE="${1:-}"
 if [[ "$MODE" != "saas" && "$MODE" != "dedicated" ]]; then
