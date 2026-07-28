@@ -149,6 +149,27 @@ check_ports_free() {
   [[ -n "$conflict" ]] && die "$conflict — pick a different --api-port/--web-port for this instance, or check --db-name is correct."
 }
 
+# ── 0c. Warn (don't block) if --domain doesn't resolve here yet ──────────
+# Caddy requests HTTPS certs automatically once DNS points at this box, but
+# fails silently in the background if it doesn't — this catches the most
+# common first-deploy mistake (forgetting the DNS step) before it wastes
+# time chasing a cert that will never issue.
+check_dns() {
+  [[ -z "$DOMAIN" ]] && return 0
+  command -v curl >/dev/null 2>&1 || return 0
+
+  local server_ip resolved_ip
+  server_ip="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  [[ -z "$server_ip" ]] && return 0
+
+  resolved_ip="$(getent hosts "$DOMAIN" 2>/dev/null | awk '{print $1}' | head -1)"
+  if [[ -z "$resolved_ip" ]]; then
+    warn "DNS for $DOMAIN doesn't resolve yet — point its A record at this server's IP ($server_ip) before (or shortly after) this finishes, or Caddy won't be able to issue an HTTPS certificate."
+  elif [[ "$resolved_ip" != "$server_ip" ]]; then
+    warn "$DOMAIN currently resolves to $resolved_ip, not this server ($server_ip) — HTTPS won't work until the A record is updated."
+  fi
+}
+
 # ── 1. System dependencies (idempotent — skipped if already present) ──────
 install_system_deps() {
   log "Checking system dependencies"
@@ -409,6 +430,54 @@ health_check() {
   else
     warn "Web app not reachable on :${WEB_PORT} — check: pm2 logs $WEB_APP"
   fi
+  # Public storefront (/v1/public/*) only serves in dedicated mode — see
+  # apps/api/src/modules/public/public.routes.ts.
+  if [[ "$MODE" == "dedicated" ]]; then
+    if curl -fsS "http://localhost:${API_PORT}/v1/public/org" >/dev/null 2>&1; then
+      echo "Public storefront: reachable"
+    else
+      warn "Public storefront (/v1/public/org) not reachable — check: pm2 logs $API_APP"
+    fi
+  fi
+}
+
+# ── Final summary — what actually got deployed and what to do next ───────
+print_summary() {
+  local web_url api_url
+  if [[ -n "$DOMAIN" ]]; then
+    web_url="https://${DOMAIN}"
+    api_url="https://api.${DOMAIN}"
+  else
+    web_url="http://<server-ip>:${WEB_PORT}"
+    api_url="http://<server-ip>:${API_PORT}"
+  fi
+
+  log "Done."
+  echo "  Mode:      $MODE"
+  echo "  Web app:   $web_url"
+  echo "  API:       $api_url"
+  [[ "$MODE" == "dedicated" ]] && echo "  Storefront: ${web_url}/  ·  Catalog: ${web_url}/catalog"
+  echo "  Staff login: ${web_url}/login"
+  echo
+
+  if [[ -z "$DOMAIN" ]]; then
+    warn "No --domain given — reachable only at the plain http:// address above. Put a reverse proxy or DNS + --domain in front for real production traffic."
+  fi
+
+  if [[ -f "$REPO_ROOT/.ledgera-default-users.txt" ]]; then
+    echo "  Default login credentials (one per role) were written to:"
+    echo "    $REPO_ROOT/.ledgera-default-users.txt"
+    echo "  Save these to your password manager, then delete the file."
+  fi
+
+  if [[ "$MODE" == "dedicated" ]]; then
+    echo
+    echo "  Before sharing the storefront link with real customers:"
+    echo "   1. Sign in and set your real business name/address/phone under Settings"
+    echo "      → Organisation (the public site and catalog pull from there — it"
+    echo "      currently shows the placeholder starter-org details)."
+    echo "   2. Add your products (with prices) under Inventory so the catalog isn't empty."
+  fi
 }
 
 main() {
@@ -416,6 +485,7 @@ main() {
   API_APP="ledgera-api-${INSTANCE}"
   WEB_APP="ledgera-web-${INSTANCE}"
   check_ports_free
+  check_dns
   echo "Deploying LEDGERA — mode=$MODE db=$DB_NAME instance=$INSTANCE domain=${DOMAIN:-none} api=:$API_PORT web=:$WEB_PORT"
   install_system_deps
   setup_database
@@ -427,8 +497,7 @@ main() {
   setup_pm2
   setup_caddy
   health_check
-  log "Done."
-  [[ -z "$DOMAIN" ]] && echo "No --domain given — app is reachable at http://<server-ip>:${WEB_PORT} (API on :${API_PORT}). Put your own reverse proxy in front for production traffic."
+  print_summary
 }
 
 main
