@@ -298,9 +298,16 @@ setup_database() {
   APP_PASS="${APP_PASS:-$(openssl rand -hex 24)}"
   BYPASS_PASS="${BYPASS_PASS:-$(openssl rand -hex 24)}"
 
+  # Piped via stdin (< file), not `-f file` — the checkout commonly lives
+  # under a directory the `postgres` OS user can't traverse (e.g. /root,
+  # normally mode 700), so `psql -f` run AS postgres would fail to even
+  # open the path. Redirection is set up by the shell (still root/the
+  # invoking user at this point) before postgres or runuser gets involved,
+  # so the already-open file descriptor sidesteps that permission check
+  # entirely.
   $PG_SUDO psql -d "$DB_NAME" \
     -v dbname="$DB_NAME" -v app_pass="$APP_PASS" -v bypass_pass="$BYPASS_PASS" \
-    -f "$REPO_ROOT/scripts/postgres-init.sql"
+    < "$REPO_ROOT/scripts/postgres-init.sql"
 }
 
 # ── 3. Env files (generated once, never overwritten on redeploy) ─────────
