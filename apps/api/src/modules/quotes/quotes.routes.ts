@@ -8,6 +8,7 @@ import { NotFoundError } from '../../utils/errors.js';
 import { logAudit } from '../../utils/audit.js';
 
 const LINE_SCHEMA = z.object({
+  productId: z.string().uuid().optional(),
   description: z.string().min(1),
   quantity: z.number().positive().default(1),
   unitPrice: z.number().min(0),
@@ -98,6 +99,7 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
       totalTax       += taxAmount;
 
       return {
+        productId: line.productId,
         description: line.description,
         quantity: String(line.quantity),
         unitPrice: String(line.unitPrice),
@@ -194,7 +196,8 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
     const { id } = req.params as { id: string };
 
     const body = z.object({
-      status: z.enum(['draft', 'sent', 'accepted', 'rejected', 'expired', 'converted']).optional(),
+      status: z.enum(['draft', 'requested', 'sent', 'accepted', 'rejected', 'expired', 'converted']).optional(),
+      convertedToSaleId: z.string().uuid().optional(),
       customerName: z.string().optional(),
       customerEmail: z.string().email().optional().or(z.literal('')),
       customerPhone: z.string().optional(),

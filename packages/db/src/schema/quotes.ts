@@ -10,9 +10,10 @@ import {
   varchar,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { quoteTypeEnum, quoteStatusEnum } from './enums.js';
+import { quoteTypeEnum, quoteStatusEnum, quoteSourceEnum } from './enums.js';
 import { organizations } from './organizations.js';
 import { customers } from './sales.js';
+import { products } from './inventory.js';
 import { users } from './users.js';
 
 export const quotes = pgTable(
@@ -23,6 +24,10 @@ export const quotes = pgTable(
     quoteNumber: varchar('quote_number', { length: 50 }).notNull(),
     type: quoteTypeEnum('type').notNull().default('quotation'),
     status: quoteStatusEnum('status').notNull().default('draft'),
+    // 'storefront' = submitted by a customer via the public catalog (see
+    // apps/api/src/modules/public/public.routes.ts) — kept distinct from
+    // `status` so the origin survives later status transitions.
+    source: quoteSourceEnum('source').notNull().default('staff'),
 
     // Customer — registered or free-text
     customerId: uuid('customer_id').references(() => customers.id),
@@ -64,6 +69,10 @@ export const quoteLines = pgTable(
     id: uuid('id').primaryKey().default(sql`uuid_generate_v4()`),
     quoteId: uuid('quote_id').notNull().references(() => quotes.id, { onDelete: 'cascade' }),
     organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    // Nullable — only set for lines sourced from the real product catalog
+    // (storefront requests, or a staff quote built from products); existing
+    // free-text quote lines have no catalog item behind them.
+    productId: uuid('product_id').references(() => products.id),
     description: text('description').notNull(),
     quantity: numeric('quantity', { precision: 18, scale: 4 }).notNull().default('1'),
     unitPrice: numeric('unit_price', { precision: 18, scale: 4 }).notNull().default('0'),

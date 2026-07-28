@@ -91,6 +91,19 @@ export const quotesApi = {
   delete: (id: string) => api.delete(`/v1/quotes/${id}`),
 };
 
+// ── Public storefront (no auth) ───────────────────────
+export const publicApi = {
+  getOrg:     () => api.get<{ data: { name: string; address: string | null; phone: string | null; email: string | null; logoUrl: string | null } }>('/v1/public/org'),
+  getCatalog: (q?: string) => api.get<{ data: unknown[] }>(`/v1/public/catalog${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  submitPurchaseRequest: (body: {
+    customerName: string;
+    customerPhone: string;
+    customerEmail?: string;
+    notes?: string;
+    lines: { productId: string; quantity: number }[];
+  }) => api.post<{ data: { referenceNumber: string; totalAmount: string; lines: unknown[] } }>('/v1/public/purchase-requests', body),
+};
+
 // ── Store Requests ────────────────────────────────────
 export const storeRequestsApi = {
   list:    (params?: Record<string, string>) => {

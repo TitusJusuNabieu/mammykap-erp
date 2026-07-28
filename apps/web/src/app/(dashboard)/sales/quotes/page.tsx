@@ -3,20 +3,22 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { Plus, Printer, Trash2, Send, CheckCircle, XCircle, Clock, FileText, X } from 'lucide-react';
+import { Plus, Printer, Trash2, Send, CheckCircle, XCircle, Clock, FileText, X, Globe, ShoppingCart } from 'lucide-react';
 import { api, quotesApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { PrintableInvoice, type InvoiceData, type InvoiceOrg, type InvoiceSettings } from '@/components/print/PrintableInvoice';
 import { usePrint } from '@/components/print/PrintableReceipt';
 
-type QuoteStatus = 'draft' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
+type QuoteStatus = 'draft' | 'requested' | 'sent' | 'accepted' | 'rejected' | 'expired' | 'converted';
 type QuoteType   = 'quotation' | 'proforma_invoice' | 'tax_invoice';
+type QuoteSource = 'staff' | 'storefront';
 
 interface QuoteRow {
   id: string;
   quoteNumber: string;
   type: QuoteType;
   status: QuoteStatus;
+  source: QuoteSource;
   customerName: string | null;
   date: string;
   expiryDate: string | null;
@@ -49,13 +51,16 @@ interface QuoteDetail extends QuoteRow {
 }
 
 const STATUS_META: Record<QuoteStatus, { label: string; color: string; icon: React.ElementType }> = {
-  draft:     { label: 'Draft',     color: 'bg-slate-100 text-slate-600 border-slate-200',   icon: FileText },
-  sent:      { label: 'Sent',      color: 'bg-blue-50 text-blue-700 border-blue-200',       icon: Send },
-  accepted:  { label: 'Accepted',  color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle },
-  rejected:  { label: 'Rejected',  color: 'bg-red-50 text-red-700 border-red-200',          icon: XCircle },
-  expired:   { label: 'Expired',   color: 'bg-amber-50 text-amber-700 border-amber-200',    icon: Clock },
-  converted: { label: 'Converted', color: 'bg-purple-50 text-purple-700 border-purple-200', icon: CheckCircle },
+  draft:     { label: 'Draft',           color: 'bg-slate-100 text-slate-600 border-slate-200',   icon: FileText },
+  requested: { label: 'Website Request', color: 'bg-amber-50 text-amber-700 border-amber-200',    icon: Globe },
+  sent:      { label: 'Sent',            color: 'bg-blue-50 text-blue-700 border-blue-200',       icon: Send },
+  accepted:  { label: 'Accepted',        color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle },
+  rejected:  { label: 'Rejected',        color: 'bg-red-50 text-red-700 border-red-200',          icon: XCircle },
+  expired:   { label: 'Expired',         color: 'bg-amber-50 text-amber-700 border-amber-200',    icon: Clock },
+  converted: { label: 'Converted',       color: 'bg-purple-50 text-purple-700 border-purple-200', icon: CheckCircle },
 };
+
+const CONVERTIBLE_STATUSES: QuoteStatus[] = ['requested', 'sent', 'accepted'];
 
 const TYPE_LABEL: Record<QuoteType, string> = {
   quotation:        'Quotation',
@@ -209,7 +214,16 @@ export default function QuotesPage() {
                   <tr key={q.id} className="hover:bg-slate-50 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-slate-700 font-medium">{q.quoteNumber}</td>
                     <td className="px-4 py-3 text-slate-600">{TYPE_LABEL[q.type]}</td>
-                    <td className="px-4 py-3 text-slate-900 font-medium">{q.customerName ?? <span className="text-slate-400 italic">No customer</span>}</td>
+                    <td className="px-4 py-3 text-slate-900 font-medium">
+                      <span className="flex items-center gap-1.5">
+                        {q.source === 'storefront' && (
+                          <span title="Submitted via website">
+                            <Globe className="w-3.5 h-3.5 text-brand-primary flex-shrink-0" />
+                          </span>
+                        )}
+                        {q.customerName ?? <span className="text-slate-400 italic">No customer</span>}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-slate-600">{formatDate(q.date)}</td>
                     <td className="px-4 py-3 text-slate-500">{q.expiryDate ? formatDate(q.expiryDate) : '—'}</td>
                     <td className="px-4 py-3 text-right font-medium text-slate-900">{formatCurrency(Number(q.totalAmount))}</td>
@@ -221,6 +235,15 @@ export default function QuotesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1 justify-end">
+                        {CONVERTIBLE_STATUSES.includes(q.status) && (
+                          <Link
+                            href={`/sales/pos?fromQuote=${q.id}` as never}
+                            className="p-1.5 rounded hover:bg-emerald-50 text-slate-500 hover:text-emerald-600 transition-colors"
+                            title="Convert to Sale"
+                          >
+                            <ShoppingCart className="w-4 h-4" />
+                          </Link>
+                        )}
                         <button
                           onClick={() => setPrintQuoteId(q.id)}
                           className="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-900 transition-colors"

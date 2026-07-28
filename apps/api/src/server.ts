@@ -24,6 +24,7 @@ import reportsRoutes from './modules/reports/reports.routes.js';
 import billingRoutes from './modules/billing/billing.routes.js';
 import quotesRoutes from './modules/quotes/quotes.routes.js';
 import dailyCloseRoutes from './modules/daily-close/daily-close.routes.js';
+import publicRoutes from './modules/public/public.routes.js';
 import auditRoutes from './modules/audit/audit.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 
@@ -138,6 +139,7 @@ export async function buildServer() {
   await app.register(billingRoutes,      { prefix: '/v1/billing' });
   await app.register(quotesRoutes,       { prefix: '/v1' });
   await app.register(dailyCloseRoutes,   { prefix: '/v1' });
+  await app.register(publicRoutes,       { prefix: '/v1' });
   await app.register(auditRoutes,        { prefix: '/v1' });
   await app.register(adminRoutes,        { prefix: '/v1/admin' });
 

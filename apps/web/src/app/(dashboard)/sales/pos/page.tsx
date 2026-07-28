@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import {
   Search, Plus, Minus, Trash2, ChevronRight, X,
-  Printer, Tag, User,
+  Printer, Tag, User, Globe,
 } from 'lucide-react';
 import { api, productsApi, salesApi } from '@/lib/api';
 import { usePOSStore, type CartLine, type CartPayment } from '@/stores/pos.store';
@@ -21,6 +22,14 @@ const PAYMENT_METHODS = [
 ] as const;
 
 export default function POSPage() {
+  return (
+    <Suspense fallback={<div className="flex h-[calc(100vh-48px)] items-center justify-center text-slate-400 text-sm">Loading…</div>}>
+      <POSPageInner />
+    </Suspense>
+  );
+}
+
+function POSPageInner() {
   const [search, setSearch]           = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastSale, setLastSale]       = useState<Record<string, unknown> | null>(null);
@@ -30,11 +39,58 @@ export default function POSPage() {
   const [expectedCollectionDate, setExpectedCollectionDate] = useState('');
   const savedCartRef = useRef<{ lines: CartLine[]; payments: CartPayment[] }>({ lines: [], payments: [] });
   const { user } = useAuthStore();
+  const searchParams = useSearchParams();
+  const fromQuoteId = searchParams.get('fromQuote');
+  const prefilledFromQuote = useRef(false);
 
   const {
     lines, payments, clearCart, addLine, updateQty, removeLine, updateDiscount,
-    setPayment, grandTotal, amountPaid, changeDue, subtotal, taxTotal, discountTotal,
+    setPayment, setCustomer, customerName, grandTotal, amountPaid, changeDue, subtotal, taxTotal, discountTotal,
   } = usePOSStore();
+
+  // Pre-fill the cart from a website purchase request (or any staff quote)
+  // when arriving via "Convert to Sale" on the Quotes page. Runs once per
+  // quote id — re-fetching products individually since GET /quotes/:id
+  // only returns the snapshot price/quantity, not full product details
+  // (current cost/tax rate) needed for the cart line.
+  const { data: quoteData } = useQuery({
+    queryKey: ['quote-for-pos', fromQuoteId],
+    queryFn: () => api.get<{ data: Record<string, unknown> }>(`/v1/quotes/${fromQuoteId}`),
+    enabled: !!fromQuoteId,
+  });
+
+  useEffect(() => {
+    if (!quoteData?.data || prefilledFromQuote.current) return;
+    prefilledFromQuote.current = true;
+    const quote = quoteData.data;
+    const quoteLines = (quote['lines'] as Record<string, unknown>[] | undefined) ?? [];
+    setCustomer(null, (quote['customerName'] as string) ?? null);
+
+    (async () => {
+      for (const line of quoteLines) {
+        const productId = line['productId'] as string | null;
+        if (!productId) continue;
+        try {
+          const res = await api.get<{ data: Record<string, unknown> }>(`/v1/products/${productId}`);
+          const prod = res.data;
+          addLine({
+            id: productId,
+            name: prod['name'] as string,
+            sku: (prod['sku'] as string) ?? null,
+            quantity: Number(line['quantity']),
+            unitPrice: Number(line['unitPrice']),
+            discountPct: 0,
+            taxRate: Number(prod['taxRate'] ?? 0),
+            unitCost: Number(prod['costPrice'] ?? 0),
+          });
+        } catch {
+          // Product may have been deactivated since the request was made —
+          // skip it, staff can add a replacement manually.
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteData]);
 
   const { data: productsData } = useQuery({
     queryKey: ['products', search],
@@ -88,6 +144,9 @@ export default function POSPage() {
       setLastSale(res.data);
       setShowReceipt(true);
       clearCart();
+      if (fromQuoteId) {
+        api.patch(`/v1/quotes/${fromQuoteId}`, { status: 'converted', convertedToSaleId: res.data['id'] }).catch(() => {});
+      }
     },
   });
 
@@ -173,8 +232,9 @@ export default function POSPage() {
       {/* Right: Cart */}
       <div className="w-96 flex flex-col bg-white overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
-          <User className="w-4 h-4 text-slate-400" />
-          <span className="text-sm text-slate-500">Walk-in customer</span>
+          {fromQuoteId && customerName ? <Globe className="w-4 h-4 text-brand-primary" /> : <User className="w-4 h-4 text-slate-400" />}
+          <span className="text-sm text-slate-700 font-medium">{customerName ?? 'Walk-in customer'}</span>
+          {fromQuoteId && <span className="text-xs text-brand-primary">(from website request)</span>}
           <button className="ml-auto text-xs text-brand-primary hover:underline">Change</button>
         </div>
 

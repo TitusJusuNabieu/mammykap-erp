@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // Routes accessible without a session
-const PUBLIC_PREFIXES = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/pricing', '/about'];
+const PUBLIC_PREFIXES = ['/', '/login', '/register', '/forgot-password', '/reset-password', '/pricing', '/about', '/catalog'];
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

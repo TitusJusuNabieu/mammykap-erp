@@ -105,12 +105,18 @@ export const quoteTypeEnum = pgEnum('quote_type', [
 
 export const quoteStatusEnum = pgEnum('quote_status', [
   'draft',
+  'requested',
   'sent',
   'accepted',
   'rejected',
   'expired',
   'converted',
 ]);
+
+// Distinguishes a customer-submitted public storefront request from a
+// staff-drafted quotation — kept separate from `status` since status moves
+// on (accepted/converted) but the origin should stay visible.
+export const quoteSourceEnum = pgEnum('quote_source', ['staff', 'storefront']);
 
 export const auditActionEnum = pgEnum('audit_action', [
   'create',
