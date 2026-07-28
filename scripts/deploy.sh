@@ -264,36 +264,57 @@ install_system_deps() {
 }
 
 # ── 2. Database + roles (idempotent via scripts/postgres-init.sql) ───────
+#
+# Self-healing by design: this repo's own credential files
+# (.ledgera_owner_pass.$DB_NAME, and apps/api/.env once it exists) are
+# always treated as the source of truth, and Postgres's actual role
+# passwords are forced to match them on every run via ALTER ROLE — not
+# just set once at CREATE time. Without this, any run that gets
+# interrupted between "role created" and "password file written" (or
+# between "password file written" and ".env generated from it") leaves
+# the two permanently out of sync with no way to recover except by hand —
+# which is exactly what broke the first several attempts at this deploy.
+# The one case this deliberately does NOT touch: a role that already
+# existed with no password file of ours for it at all (e.g. shared with
+# another instance's database on the same multi-tenant host) — there we
+# have no record to enforce, so it's left alone, same as before.
 setup_database() {
   log "Setting up PostgreSQL database and roles ($DB_NAME)"
 
-  local db_exists
+  local db_exists schema_owner_exists owner_pass_file owner_pass
   db_exists="$($PG_SUDO psql -tAc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'")"
+  schema_owner_exists="$($PG_SUDO psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='ledgera'")"
+  owner_pass_file="$REPO_ROOT/.ledgera_owner_pass.$DB_NAME"
+
+  if [[ "$schema_owner_exists" != "1" ]]; then
+    log "Creating schema-owner role 'ledgera'"
+    owner_pass="$(openssl rand -hex 24)"
+    $PG_SUDO psql -c "CREATE ROLE ledgera LOGIN PASSWORD '${owner_pass}';"
+    echo "$owner_pass" > "$owner_pass_file"
+    chmod 600 "$owner_pass_file"
+    warn "Schema-owner password saved to .ledgera_owner_pass.$DB_NAME (gitignored) — back this up to your secrets manager."
+  elif [[ -f "$owner_pass_file" ]]; then
+    log "Reconciling 'ledgera' role password with .ledgera_owner_pass.$DB_NAME"
+    owner_pass="$(cat "$owner_pass_file")"
+    $PG_SUDO psql -c "ALTER ROLE ledgera PASSWORD '${owner_pass}';"
+  else
+    warn "'ledgera' role already exists with no local password record for it (shared with another instance?) — leaving it untouched."
+  fi
+
   if [[ "$db_exists" != "1" ]]; then
-    local schema_owner_exists
-    schema_owner_exists="$($PG_SUDO psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='ledgera'")"
-    if [[ "$schema_owner_exists" != "1" ]]; then
-      log "Creating schema-owner role 'ledgera'"
-      LEDGERA_OWNER_PASS="$(openssl rand -hex 24)"
-      $PG_SUDO psql -c "CREATE ROLE ledgera LOGIN PASSWORD '${LEDGERA_OWNER_PASS}';"
-      echo "$LEDGERA_OWNER_PASS" > "$REPO_ROOT/.ledgera_owner_pass.$DB_NAME"
-      chmod 600 "$REPO_ROOT/.ledgera_owner_pass.$DB_NAME"
-      warn "Schema-owner password saved to .ledgera_owner_pass.$DB_NAME (gitignored) — back this up to your secrets manager."
-    fi
     log "Creating database '$DB_NAME'"
     $PG_SUDO psql -c "CREATE DATABASE ${DB_NAME} OWNER ledgera;"
   else
     echo "Database '$DB_NAME' already exists"
   fi
 
-  # Reuse existing app/bypass role passwords from a prior deploy if this
-  # host's .env already has them; otherwise generate new ones. Never
-  # rotate an existing role's password (postgres-init.sql skips CREATE ROLE
-  # entirely when the role already exists — the passwords below only take
-  # effect the first time each role is created on this Postgres cluster).
+  # App/bypass role passwords: this checkout's own apps/api/.env, once it
+  # exists, is the source of truth (same reasoning as owner_pass above).
+  local reconcile_app_roles=0
   if [[ -f "$API_ENV" ]]; then
     APP_PASS="$(grep -oP '(?<=ledgera_app:)[^@]+' "$API_ENV" | head -1 || true)"
     BYPASS_PASS="$(grep -oP '(?<=ledgera_bypass:)[^@]+' "$API_ENV" | head -1 || true)"
+    [[ -n "$APP_PASS" && -n "$BYPASS_PASS" ]] && reconcile_app_roles=1
   fi
   APP_PASS="${APP_PASS:-$(openssl rand -hex 24)}"
   BYPASS_PASS="${BYPASS_PASS:-$(openssl rand -hex 24)}"
@@ -308,6 +329,15 @@ setup_database() {
   $PG_SUDO psql -d "$DB_NAME" \
     -v dbname="$DB_NAME" -v app_pass="$APP_PASS" -v bypass_pass="$BYPASS_PASS" \
     < "$REPO_ROOT/scripts/postgres-init.sql"
+
+  # postgres-init.sql only sets these passwords at CREATE time — if the
+  # roles already existed (e.g. an earlier interrupted run, or this exact
+  # scenario: .env recorded a password that was never actually applied),
+  # force them to match our own recorded values now.
+  if [[ "$reconcile_app_roles" == "1" ]]; then
+    log "Reconciling ledgera_app/ledgera_bypass passwords with $API_ENV"
+    $PG_SUDO psql -d "$DB_NAME" -c "ALTER ROLE ledgera_app PASSWORD '${APP_PASS}'; ALTER ROLE ledgera_bypass PASSWORD '${BYPASS_PASS}';"
+  fi
 }
 
 # ── 3. Env files (generated once, never overwritten on redeploy) ─────────
@@ -380,6 +410,23 @@ EOF
     chmod 600 "$API_ENV"
   else
     echo "$API_ENV already exists — leaving it untouched"
+
+    # The one deliberate exception to "never rewritten": DATABASE_MIGRATOR_URL
+    # is the one line nothing else depends on staying stable (it's used only
+    # for running migrations, never by the running app), and it's exactly
+    # the line most likely to have been written wrong by an earlier
+    # interrupted run (the placeholder CHANGE_ME_MIGRATOR_PASSWORD, or a
+    # password that predates setup_database()'s reconciliation above).
+    # Keep it correct on every run instead of requiring a manual fix.
+    if [[ "$owner_pass" != "CHANGE_ME_MIGRATOR_PASSWORD" ]]; then
+      local correct_migrator_url="postgres://ledgera:${owner_pass}@localhost:5432/${DB_NAME}"
+      if ! grep -qF "DATABASE_MIGRATOR_URL=${correct_migrator_url}" "$API_ENV"; then
+        sed -i.bak "s|^DATABASE_MIGRATOR_URL=.*|DATABASE_MIGRATOR_URL=${correct_migrator_url}|" "$API_ENV"
+        rm -f "${API_ENV}.bak"
+        chmod 600 "$API_ENV"
+        warn "DATABASE_MIGRATOR_URL in $API_ENV didn't match the current 'ledgera' role password — corrected it automatically."
+      fi
+    fi
   fi
 
   if [[ ! -f "$WEB_ENV" ]]; then
