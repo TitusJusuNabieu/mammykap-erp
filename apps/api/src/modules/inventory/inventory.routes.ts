@@ -7,6 +7,7 @@ import { enforcePlanLimit } from '../../middleware/subscription.js';
 import { NotFoundError } from '../../utils/errors.js';
 import { InventoryEngine } from './inventory.engine.js';
 import { nextSequence } from '../../utils/sequence.js';
+import { logAudit } from '../../utils/audit.js';
 
 const inventoryRoutes: FastifyPluginAsync = async (app) => {
 
@@ -20,7 +21,7 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/categories', { preHandler: [authenticate, requireMinRole('inventory_officer')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       name: z.string().min(1),
       parentId: z.string().uuid().optional(),
@@ -30,6 +31,16 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
     const [cat] = await req.db.insert(categories)
       .values({ ...body, organizationId: orgId })
       .returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'category',
+      resourceId: cat!.id,
+      resourceNumber: cat!.name,
+    });
+
     return reply.status(201).send({ data: cat });
   });
 
@@ -149,6 +160,15 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
       })
       .returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'product',
+      resourceId: product!.id,
+      resourceNumber: product!.sku ?? product!.name,
+    });
+
     return reply.status(201).send({ data: product });
   });
 
@@ -173,7 +193,7 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/products/:id', { preHandler: [authenticate, requireMinRole('inventory_officer')] }, async (req) => {
     const { id } = req.params as { id: string };
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       name: z.string().optional(),
       costPrice: z.number().min(0).optional(),
@@ -203,6 +223,17 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
       .returning();
 
     if (!updated) throw new NotFoundError('Product');
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'product',
+      resourceId: updated.id,
+      resourceNumber: updated.sku ?? updated.name,
+      changes: body,
+    });
+
     return { data: updated };
   });
 
@@ -289,6 +320,15 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
       .set({ status: 'in_transit', shippedAt: new Date(), shippedBy: userId })
       .where(eq(stockTransfers.id, transfer.id));
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'stock_transfer',
+      resourceId: transfer.id,
+      resourceNumber: transferNumber,
+    });
+
     return reply.status(201).send({ data: transfer });
   });
 
@@ -342,6 +382,15 @@ const inventoryRoutes: FastifyPluginAsync = async (app) => {
       .update(stockTransfers)
       .set({ status: 'received', receivedAt: new Date(), receivedBy: userId })
       .where(eq(stockTransfers.id, id));
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'stock_transfer',
+      resourceId: id,
+      resourceNumber: transfer.transferNumber,
+    });
 
     return { data: { success: true } };
   });

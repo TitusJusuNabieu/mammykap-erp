@@ -8,7 +8,8 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
@@ -20,17 +21,17 @@
     "@fastify/swagger": "^9.5.1",
     "@fastify/swagger-ui": "^5.2.3",
     "@ledgera/db": "workspace:*",
-    "drizzle-orm": "^0.44.2",
     "bcryptjs": "^3.0.2",
     "date-fns": "^4.1.0",
+    "drizzle-orm": "^0.44.2",
     "fastify": "^5.4.0",
     "fastify-plugin": "^5.0.1",
-    "pino-pretty": "^13.0.0",
     "ioredis": "^5.6.1",
     "nanoid": "^5.1.5",
     "node-cron": "^4.5.0",
     "nodemailer": "^6.10.1",
     "otpauth": "^9.4.1",
+    "pino-pretty": "^13.0.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {
@@ -41,6 +42,7 @@
     "eslint": "^9.29.0",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.61.1"
+    "typescript-eslint": "^8.61.1",
+    "vitest": "^4.1.10"
   }
 }

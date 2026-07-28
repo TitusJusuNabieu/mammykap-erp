@@ -6,6 +6,7 @@ import { authenticate, requireMinRole } from '../../middleware/auth.js';
 import { NotFoundError, ForbiddenError } from '../../utils/errors.js';
 import { AccountingEngine } from '../accounting/accounting.engine.js';
 import { nextSequence } from '../../utils/sequence.js';
+import { logAudit } from '../../utils/audit.js';
 
 const expensesRoutes: FastifyPluginAsync = async (app) => {
 
@@ -19,7 +20,7 @@ const expensesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/expense-categories', { preHandler: [authenticate, requireMinRole('accountant')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       name: z.string().min(1).max(255),
       accountId: z.string().uuid().optional(),
@@ -28,6 +29,15 @@ const expensesRoutes: FastifyPluginAsync = async (app) => {
     const [cat] = await req.db.insert(expenseCategories)
       .values({ ...body, organizationId: orgId })
       .returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'expense_category',
+      resourceId: cat!.id,
+      resourceNumber: cat!.name,
+    });
 
     return reply.status(201).send({ data: cat });
   });
@@ -86,6 +96,15 @@ const expensesRoutes: FastifyPluginAsync = async (app) => {
       createdBy: userId,
     }).returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'expense',
+      resourceId: expense!.id,
+      resourceNumber: expense!.expenseNumber,
+    });
+
     return reply.status(201).send({ data: expense });
   });
 
@@ -110,6 +129,15 @@ const expensesRoutes: FastifyPluginAsync = async (app) => {
       .set({ status: 'submitted', updatedAt: new Date() })
       .where(eq(expenses.id, id))
       .returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'expense',
+      resourceId: id,
+      resourceNumber: expense.expenseNumber,
+    });
 
     return { data: updated };
   });
@@ -168,17 +196,37 @@ const expensesRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(expenses.id, id));
     }
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'approve',
+      resourceType: 'expense',
+      resourceId: id,
+      resourceNumber: expense.expenseNumber,
+    });
+
     return { data: { success: true } };
   });
 
   app.post('/expenses/:id/reject', { preHandler: [authenticate, requireMinRole('branch_manager')] }, async (req) => {
     const { id } = req.params as { id: string };
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const { reason } = z.object({ reason: z.string().min(1) }).parse(req.body);
 
-    await req.db.update(expenses)
+    const [updated] = await req.db.update(expenses)
       .set({ status: 'rejected', updatedAt: new Date() })
-      .where(and(eq(expenses.id, id), eq(expenses.organizationId, orgId)));
+      .where(and(eq(expenses.id, id), eq(expenses.organizationId, orgId)))
+      .returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'reject',
+      resourceType: 'expense',
+      resourceId: id,
+      resourceNumber: updated?.expenseNumber,
+      changes: { reason },
+    });
 
     return { data: { success: true, reason } };
   });

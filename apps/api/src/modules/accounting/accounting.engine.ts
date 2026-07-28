@@ -243,7 +243,23 @@ export class AccountingEngine {
       )
       .returning({ val: sequences.currentValue });
 
-    const n = Number(result?.val ?? 1);
+    let n: number;
+    if (result) {
+      n = Number(result.val);
+    } else {
+      // No row yet for this org (normally pre-seeded by
+      // db:seed-default-users, but not guaranteed — e.g. a fresh org
+      // created some other way) — bootstrap it, same fallback pattern as
+      // utils/sequence.ts's nextSequence. Without this, every call here
+      // silently returns "1" forever (never persisting anything), so the
+      // second journal entry ever posted for that org collides on the
+      // unique entry_number index.
+      const [inserted] = await tx
+        .insert(sequences)
+        .values({ organizationId: orgId, sequenceKey: 'journal_entry', currentValue: '1' })
+        .returning({ val: sequences.currentValue });
+      n = Number(inserted?.val ?? 1);
+    }
     return `JE-${new Date().getFullYear()}-${String(n).padStart(6, '0')}`;
   }
 }

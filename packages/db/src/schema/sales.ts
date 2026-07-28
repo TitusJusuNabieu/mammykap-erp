@@ -60,6 +60,12 @@ export const sales = pgTable(
     amountDue: numeric('amount_due', { precision: 18, scale: 4 }).notNull().default('0'),
     status: invoiceStatusEnum('status').notNull().default('draft'),
     isCreditSale: boolean('is_credit_sale').notNull().default(false),
+    // Store-request handover fields — see schema/store-requests.ts. Goods
+    // leave (and, past organizationSettings.depositGracePeriodDays, get
+    // repriced) at handover time, not at this sale's creation time.
+    expectedCollectionDate: date('expected_collection_date').notNull(),
+    isRepriced: boolean('is_repriced').notNull().default(false),
+    repricedAt: timestamp('repriced_at', { withTimezone: true }),
     notes: text('notes'),
     receiptUrl: text('receipt_url'),
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id),

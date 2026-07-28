@@ -5,6 +5,7 @@ import { quotes, quoteLines, customers } from '@ledgera/db';
 import { authenticate, requireMinRole } from '../../middleware/auth.js';
 import { nextSequence } from '../../utils/sequence.js';
 import { NotFoundError } from '../../utils/errors.js';
+import { logAudit } from '../../utils/audit.js';
 
 const LINE_SCHEMA = z.object({
   description: z.string().min(1),
@@ -143,6 +144,15 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
       lineData.map((l) => ({ ...l, quoteId: quote.id })),
     );
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'quote',
+      resourceId: quote.id,
+      resourceNumber: quoteNumber,
+    });
+
     return reply.status(201).send({ data: quote });
   });
 
@@ -180,7 +190,7 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
 
   // ── PATCH /quotes/:id ─────────────────────────────
   app.patch('/quotes/:id', { preHandler: [authenticate, requireMinRole('cashier')] }, async (req) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const { id } = req.params as { id: string };
 
     const body = z.object({
@@ -209,16 +219,26 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
       .where(eq(quotes.id, id))
       .returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'quote',
+      resourceId: id,
+      resourceNumber: existing.quoteNumber,
+      changes: body,
+    });
+
     return { data: updated };
   });
 
   // ── DELETE /quotes/:id ────────────────────────────
   app.delete('/quotes/:id', { preHandler: [authenticate, requireMinRole('branch_manager')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const { id } = req.params as { id: string };
 
     const [existing] = await req.db
-      .select({ id: quotes.id, status: quotes.status })
+      .select({ id: quotes.id, status: quotes.status, quoteNumber: quotes.quoteNumber })
       .from(quotes)
       .where(and(eq(quotes.id, id), eq(quotes.organizationId, orgId), isNull(quotes.deletedAt)))
       .limit(1);
@@ -227,6 +247,15 @@ const quotesRoutes: FastifyPluginAsync = async (app) => {
 
     // Soft delete — consistent with every other module's delete invariant.
     await req.db.update(quotes).set({ deletedAt: new Date() }).where(eq(quotes.id, id));
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'delete',
+      resourceType: 'quote',
+      resourceId: id,
+      resourceNumber: existing.quoteNumber,
+    });
 
     return reply.status(204).send();
   });

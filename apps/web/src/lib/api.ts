@@ -91,6 +91,33 @@ export const quotesApi = {
   delete: (id: string) => api.delete(`/v1/quotes/${id}`),
 };
 
+// ── Store Requests ────────────────────────────────────
+export const storeRequestsApi = {
+  list:    (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return api.get<{ data: unknown[] }>(`/v1/store-requests${qs}`);
+  },
+  get:     (id: string) => api.get<{ data: unknown }>(`/v1/store-requests/${id}`),
+  supply:  (id: string, body: { lines?: { storeRequestLineId: string; quantity: number }[]; notes?: string }) =>
+    api.post<{ data: unknown }>(`/v1/store-requests/${id}/supply`, body),
+  reject:  (id: string, body: { reason: string; lines?: { storeRequestLineId: string; quantity: number }[] }) =>
+    api.post<{ data: unknown }>(`/v1/store-requests/${id}/reject`, body),
+};
+
+// ── Daily Close ────────────────────────────────────────
+export const dailyCloseApi = {
+  status: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return api.get<{ data: Record<string, unknown> }>(`/v1/daily-close/status${qs}`);
+  },
+  close:  (body: { date?: string; branchId?: string; notes?: string }) =>
+    api.post<{ data: unknown }>('/v1/daily-close', body),
+  list:   (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return api.get<{ data: unknown[] }>(`/v1/daily-close${qs}`);
+  },
+};
+
 // ── Reports ──────────────────────────────────────────
 export const reportsApi = {
   pnl:           (params: Record<string, string>) =>

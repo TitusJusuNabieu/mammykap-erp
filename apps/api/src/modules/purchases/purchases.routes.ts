@@ -45,6 +45,15 @@ const purchasesRoutes: FastifyPluginAsync = async (app) => {
       createdBy: userId,
     }).returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'supplier',
+      resourceId: supplier!.id,
+      resourceNumber: supplier!.supplierNumber,
+    });
+
     return reply.status(201).send({ data: supplier });
   });
 
@@ -149,6 +158,16 @@ const purchasesRoutes: FastifyPluginAsync = async (app) => {
       .where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.organizationId, orgId)))
       .returning();
     if (!updated) throw new NotFoundError('Purchase Order');
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'approve',
+      resourceType: 'purchase_order',
+      resourceId: updated.id,
+      resourceNumber: updated.poNumber,
+    });
+
     return { data: updated };
   });
 
@@ -247,6 +266,15 @@ const purchasesRoutes: FastifyPluginAsync = async (app) => {
         .where(eq(goodsReceivedNotes.id, grn.id));
     }
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'grn',
+      resourceId: grn.id,
+      resourceNumber: grnNumber,
+    });
+
     return reply.status(201).send({ data: grn });
   });
 
@@ -306,6 +334,15 @@ const purchasesRoutes: FastifyPluginAsync = async (app) => {
         .set({ journalEntryId: je.id })
         .where(eq(supplierPayments.id, payment!.id));
     }
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'supplier_payment',
+      resourceId: payment!.id,
+      resourceNumber: paymentNumber,
+    });
 
     return reply.status(201).send({ data: payment });
   });

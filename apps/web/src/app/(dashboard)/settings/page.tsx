@@ -268,6 +268,14 @@ export default function SettingsPage() {
                 </div>
                 <input type="checkbox" {...settingsForm.register('allowNegativeStock')} className="w-4 h-4 accent-brand-primary" />
               </div>
+              <div>
+                <label className="text-xs font-medium text-slate-600 block mb-1">Deposit / Layaway Grace Period (days)</label>
+                <p className="text-xs text-slate-400 mb-1.5">
+                  A customer who pays now and collects later keeps the quoted price within this many days.
+                  Past it, the store request is repriced at the product&rsquo;s current selling price when supplied.
+                </p>
+                <input {...settingsForm.register('depositGracePeriodDays')} type="number" step="1" min="0" className={cn(inputCls, 'w-32')} />
+              </div>
               <LoadingButton type="submit" loading={settingsMutation.isPending} loadingText="Saving…"
                 disabled={!settingsForm.formState.isDirty}
                 className="bg-brand-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-brand-light">

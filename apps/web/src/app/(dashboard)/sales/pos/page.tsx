@@ -24,6 +24,10 @@ export default function POSPage() {
   const [search, setSearch]           = useState('');
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastSale, setLastSale]       = useState<Record<string, unknown> | null>(null);
+  // Blank = pickup today. Goods only actually leave once store/warehouse
+  // staff supply the resulting store request (see /store-requests) — this
+  // just records when the customer expects to collect.
+  const [expectedCollectionDate, setExpectedCollectionDate] = useState('');
   const savedCartRef = useRef<{ lines: CartLine[]; payments: CartPayment[] }>({ lines: [], payments: [] });
   const { user } = useAuthStore();
 
@@ -71,6 +75,7 @@ export default function POSPage() {
           accountId: p.accountId,
           reference: p.reference,
         })),
+        expectedCollectionDate: expectedCollectionDate || undefined,
         notes: null,
       };
       return salesApi.create(body) as Promise<{ data: Record<string, unknown> }>;
@@ -171,6 +176,18 @@ export default function POSPage() {
           <User className="w-4 h-4 text-slate-400" />
           <span className="text-sm text-slate-500">Walk-in customer</span>
           <button className="ml-auto text-xs text-brand-primary hover:underline">Change</button>
+        </div>
+
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border bg-slate-50/50">
+          <label className="text-xs text-slate-500 flex-shrink-0">Collect on</label>
+          <input
+            type="date"
+            value={expectedCollectionDate}
+            onChange={(e) => setExpectedCollectionDate(e.target.value)}
+            min={new Date().toISOString().slice(0, 10)}
+            placeholder="Today"
+            className="flex-1 text-xs border border-slate-200 rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-brand-primary/30"
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto divide-y divide-slate-50">

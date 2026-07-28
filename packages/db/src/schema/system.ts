@@ -1,5 +1,6 @@
 import {
   boolean,
+  integer,
   jsonb,
   numeric,
   pgTable,
@@ -55,6 +56,10 @@ export const organizationSettings = pgTable('organization_settings', {
   enablePayroll: boolean('enable_payroll').notNull().default(true),
   enableMomo: boolean('enable_momo').notNull().default(true),
   allowNegativeStock: boolean('allow_negative_stock').notNull().default(false),
+  // Days after a sale during which the originally quoted price still holds
+  // at handover; past this, storeRequests.supply reprices at the product's
+  // current sellingPrice. See store-requests.ts.
+  depositGracePeriodDays: integer('deposit_grace_period_days').notNull().default(60),
   lowStockNotification: boolean('low_stock_notification').notNull().default(true),
   whatsappReceipts: boolean('whatsapp_receipts').notNull().default(false),
   smsReceipts: boolean('sms_receipts').notNull().default(false),

@@ -6,6 +6,7 @@ import { subscriptions, organizations } from '@ledgera/db';
 import { authenticate, requireMinRole } from '../../middleware/auth.js';
 import { monimeService, type MonimeNetwork, type MonimeWebhookPayload } from '../../services/monime.service.js';
 import { ValidationError, NotFoundError } from '../../utils/errors.js';
+import { logAudit } from '../../utils/audit.js';
 
 const PLAN_PRICES: Record<string, number> = {
   starter:    500_000,
@@ -45,7 +46,7 @@ const billingRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /billing/initiate ────────────────────────────
   // Starts a Monime payment request to collect a subscription fee
   app.post('/initiate', { preHandler: [authenticate, requireMinRole('org_owner')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
 
     const body = z.object({
       plan:        z.enum(['starter', 'growth', 'business']),
@@ -75,6 +76,15 @@ const billingRoutes: FastifyPluginAsync = async (app) => {
       reference,
       callbackUrl: `${process.env['API_URL'] ?? 'http://localhost:3001'}/v1/billing/webhook`,
       metadata: { org_id: orgId, plan: body.plan },
+    });
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'billing_payment',
+      resourceId: payment.id,
+      resourceNumber: reference,
     });
 
     return reply.status(201).send({
@@ -186,7 +196,7 @@ const billingRoutes: FastifyPluginAsync = async (app) => {
       description: z.string().default('Payment to LEDGERA merchant'),
     }).parse(req.body);
 
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const reference = `POS-${orgId.slice(0, 6).toUpperCase()}-${nanoid(10)}`;
 
     const payment = await monimeService.collectPayment({
@@ -198,6 +208,15 @@ const billingRoutes: FastifyPluginAsync = async (app) => {
       reference,
       callbackUrl: `${process.env['API_URL'] ?? 'http://localhost:3001'}/v1/billing/webhook`,
       metadata:    { org_id: orgId, sale_id: body.saleId ?? '' },
+    });
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'pos_payment',
+      resourceId: payment.id,
+      resourceNumber: reference,
     });
 
     return reply.status(201).send({

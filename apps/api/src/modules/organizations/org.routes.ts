@@ -80,6 +80,7 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
       taxNumber: z.string().optional(),
       enableMomo: z.boolean().optional(),
       allowNegativeStock: z.boolean().optional(),
+      depositGracePeriodDays: z.number().int().min(0).optional(),
       whatsappReceipts: z.boolean().optional(),
       smsReceipts: z.boolean().optional(),
       posAutoPrint: z.boolean().optional(),
@@ -142,7 +143,7 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
 
   // ── POST /org/branches ───────────────────────────
   app.post('/branches', { preHandler: [authenticate, requireMinRole('org_owner'), enforcePlanLimit('branches')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       name: z.string().min(1).max(255),
       code: z.string().min(1).max(20).toUpperCase(),
@@ -156,13 +157,22 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
       .values({ ...body, organizationId: orgId })
       .returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'branch',
+      resourceId: branch!.id,
+      resourceNumber: branch!.code,
+    });
+
     return reply.status(201).send({ data: branch });
   });
 
   // ── PATCH /org/branches/:id ──────────────────────
   app.patch('/branches/:id', { preHandler: [authenticate, requireMinRole('org_owner')] }, async (req) => {
     const { id } = req.params as { id: string };
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       name: z.string().optional(),
       address: z.string().optional(),
@@ -178,6 +188,17 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
       .returning();
 
     if (!updated) throw new NotFoundError('Branch');
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'branch',
+      resourceId: updated.id,
+      resourceNumber: updated.code,
+      changes: body,
+    });
+
     return { data: updated };
   });
 
@@ -275,6 +296,15 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
       expiresAt: expires,
     }).returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'org_invitation',
+      resourceId: inv!.id,
+      resourceNumber: inv!.email,
+    });
+
     // TODO: send invite email with token
     return reply.status(201).send({
       data: { id: inv!.id, email: inv!.email, role: inv!.role, expiresAt: inv!.expiresAt },
@@ -350,6 +380,15 @@ const orgRoutes: FastifyPluginAsync = async (app) => {
     await app.adminDb.update(orgInvitations)
       .set({ acceptedAt: new Date() })
       .where(eq(orgInvitations.id, inv.id));
+
+    await logAudit(app.adminDb, {
+      organizationId: inv.organizationId,
+      userId: targetUserId,
+      action: 'create',
+      resourceType: 'organization_user',
+      resourceId: targetUserId,
+      resourceNumber: inv.email,
+    });
 
     return reply.send({ data: { success: true, message: 'Invitation accepted. You can now log in.' } });
   });

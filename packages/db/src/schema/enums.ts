@@ -121,6 +121,9 @@ export const auditActionEnum = pgEnum('audit_action', [
   'logout',
   'export',
   'print',
+  'approve',
+  'reject',
+  'access',
 ]);
 
 export const notificationChannelEnum = pgEnum('notification_channel', [
@@ -129,4 +132,12 @@ export const notificationChannelEnum = pgEnum('notification_channel', [
   'sms',
   'whatsapp',
   'push',
+]);
+
+export const storeRequestStatusEnum = pgEnum('store_request_status', [
+  'pending',
+  'partially_supplied',
+  'supplied',
+  'rejected',
+  'cancelled',
 ]);

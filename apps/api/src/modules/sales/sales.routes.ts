@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { eq, and, desc, gte, lte, inArray, sql } from 'drizzle-orm';
 import {
   sales, saleLines, salePayments, customers, customerPayments,
-  products, accounts, organizationSettings,
+  products, accounts, organizationSettings, storeRequests, storeRequestLines,
+  storeRequestSupplies, storeRequestSupplyLines,
 } from '@ledgera/db';
 import { authenticate, requireMinRole } from '../../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../../utils/errors.js';
@@ -57,6 +58,9 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
     const body = z.object({
       branchId: z.string().uuid().optional(),
       date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).default(() => new Date().toISOString().slice(0, 10)),
+      // When goods are expected to be handed over at the store/warehouse —
+      // defaults to same-day pickup. See POST /store-requests/:id/supply.
+      expectedCollectionDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
       customerId: z.string().uuid().optional(),
       isCreditSale: z.boolean().default(false),
       notes: z.string().optional(),
@@ -77,6 +81,7 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
 
     const branchId = body.branchId ?? userBranchId;
     if (!branchId) throw new ValidationError('Branch ID is required');
+    const expectedCollectionDate = body.expectedCollectionDate ?? body.date;
 
     // Get org settings for tax
     const [settings] = await req.db
@@ -104,7 +109,6 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
     const accByCode = new Map(accRows.map((a) => [a.code, a]));
 
     const accounting = new AccountingEngine(req.db);
-    const inventory = new InventoryEngine(req.db);
 
     // Calculate totals
     let subtotal = 0;
@@ -164,6 +168,7 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
       branchId,
       saleNumber,
       date: body.date,
+      expectedCollectionDate,
       customerId: body.customerId,
       isCreditSale: body.isCreditSale,
       subtotal: String(subtotal),
@@ -179,9 +184,12 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
 
     if (!sale) throw new Error('Failed to create sale');
 
-    // Insert sale lines + adjust inventory
+    // Insert sale lines. Stock is deliberately NOT adjusted here — goods
+    // leave (and, past the grace period, get repriced) only when the store
+    // request created below is fulfilled via POST /store-requests/:id/supply.
+    const insertedLines: (typeof saleLines.$inferSelect)[] = [];
     for (const line of lineData) {
-      await req.db.insert(saleLines).values({
+      const [insertedLine] = await req.db.insert(saleLines).values({
         saleId: sale.id,
         organizationId: orgId,
         productId: line.productId,
@@ -194,23 +202,44 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
         taxAmount: String(line.taxAmount),
         lineTotal: String(line.lineTotal),
         unitCost: String(line.unitCost),
-      });
-
-      if (line.product.trackInventory) {
-        await inventory.adjustStock({
-          orgId,
-          branchId,
-          productId: line.productId,
-          variantId: line.variantId,
-          quantity: -line.quantity,
-          unitCost: line.unitCost,
-          movementType: 'sale',
-          sourceType: 'sale',
-          sourceId: sale.id,
-          userId,
-        });
-      }
+      }).returning();
+      if (!insertedLine) throw new Error('Failed to create sale line');
+      insertedLines.push(insertedLine);
     }
+
+    // Store request — the sales-desk request that store/warehouse staff
+    // resolve (in full or in batches) via POST /store-requests/:id/supply.
+    const storeRequestNumber = await nextSequence(req.db, orgId, 'store_request', 'SRQ', 6);
+    const [storeRequest] = await req.db.insert(storeRequests).values({
+      organizationId: orgId,
+      branchId,
+      storeRequestNumber,
+      saleId: sale.id,
+      expectedCollectionDate,
+      requestedBy: userId,
+    }).returning();
+    if (!storeRequest) throw new Error('Failed to create store request');
+
+    await req.db.insert(storeRequestLines).values(
+      insertedLines.map((sl) => ({
+        storeRequestId: storeRequest.id,
+        saleLineId: sl.id,
+        productId: sl.productId,
+        variantId: sl.variantId,
+        quantity: sl.quantity,
+        requestedUnitPrice: sl.unitPrice,
+        requestedLineTotal: sl.lineTotal,
+      })),
+    );
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'store_request',
+      resourceId: storeRequest.id,
+      resourceNumber: storeRequestNumber,
+    });
 
     // Insert payments
     if (!body.isCreditSale && body.payments) {
@@ -226,15 +255,13 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
       );
     }
 
-    // Post journal entry
-    const cogsAccount    = accByCode.get('5000');
+    // Post journal entry — revenue-side only. COGS/Inventory is posted
+    // separately, at supply time (POST /store-requests/:id/supply), since
+    // stock hasn't actually left yet at sale-creation time.
     const revenueAccount = accByCode.get('4001');
     const taxAccount     = accByCode.get('2300');
     const cashAccount    = accByCode.get('1001');
     const arAccount      = accByCode.get('1040');
-    const inventoryAccount = accByCode.get('1100');
-
-    const totalCOGS = lineData.reduce((s, l) => s + l.quantity * l.unitCost, 0);
 
     if (revenueAccount && (cashAccount || arAccount)) {
       const debitAccount = body.isCreditSale ? arAccount : cashAccount;
@@ -248,13 +275,6 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
 
       if (totalTax > 0 && taxAccount) {
         journalLines.push({ accountId: taxAccount.id, debit: 0, credit: totalTax, description: 'GST/VAT' });
-      }
-
-      if (totalCOGS > 0 && cogsAccount && inventoryAccount) {
-        journalLines.push(
-          { accountId: cogsAccount.id,     debit: totalCOGS, credit: 0,         description: `COGS ${saleNumber}` },
-          { accountId: inventoryAccount.id, debit: 0,         credit: totalCOGS, description: 'Inventory reduction' },
-        );
       }
 
       const je = await accounting.postJournal({
@@ -321,27 +341,55 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
     if (!sale) throw new NotFoundError('Sale');
     if (sale.status === 'cancelled') throw new ValidationError('Sale already voided');
 
-    // Restore inventory
-    const lines = await req.db.select().from(saleLines).where(eq(saleLines.saleId, id));
-    const inventory = new InventoryEngine(req.db);
+    const accounting = new AccountingEngine(req.db);
 
-    for (const line of lines) {
-      await inventory.adjustStock({
-        orgId,
-        branchId: sale.branchId,
-        productId: line.productId,
-        quantity: Number(line.quantity),
-        unitCost: Number(line.unitCost),
-        movementType: 'return_in',
-        sourceType: 'sale_void',
-        sourceId: id,
-        userId,
-      });
+    // Stock only actually left for whatever quantity was already supplied
+    // via the store request (see store-requests.routes.ts) — restoring the
+    // full original sale-line quantities here (the old behavior) would be
+    // wrong for anything still pending/partially supplied.
+    const [sr] = await req.db.select().from(storeRequests).where(eq(storeRequests.saleId, id));
+    if (sr) {
+      const supplies = await req.db.select().from(storeRequestSupplies).where(eq(storeRequestSupplies.storeRequestId, sr.id));
+      if (supplies.length > 0) {
+        const supplyIds = supplies.map((s) => s.id);
+        const [supplyLines, srLines] = await Promise.all([
+          req.db.select().from(storeRequestSupplyLines).where(inArray(storeRequestSupplyLines.storeRequestSupplyId, supplyIds)),
+          req.db.select().from(storeRequestLines).where(eq(storeRequestLines.storeRequestId, sr.id)),
+        ]);
+        const srLineMap = new Map(srLines.map((l) => [l.id, l]));
+        const inventory = new InventoryEngine(req.db);
+
+        for (const sl of supplyLines) {
+          const parentLine = srLineMap.get(sl.storeRequestLineId);
+          if (!parentLine) continue;
+          await inventory.adjustStock({
+            orgId,
+            branchId: sale.branchId,
+            productId: parentLine.productId,
+            variantId: parentLine.variantId ?? undefined,
+            quantity: Number(sl.quantitySupplied),
+            unitCost: Number(sl.unitCost),
+            movementType: 'return_in',
+            sourceType: 'sale_void',
+            sourceId: id,
+            userId,
+          });
+        }
+
+        for (const s of supplies) {
+          if (s.cogsJournalEntryId) {
+            await accounting.voidJournal(s.cogsJournalEntryId, orgId, `Sale voided: ${reason}`, userId);
+          }
+          if (s.priceAdjustmentJournalEntryId) {
+            await accounting.voidJournal(s.priceAdjustmentJournalEntryId, orgId, `Sale voided: ${reason}`, userId);
+          }
+        }
+      }
+      await req.db.update(storeRequests).set({ status: 'cancelled' }).where(eq(storeRequests.id, sr.id));
     }
 
-    // Void journal
+    // Void the sale's own revenue journal entry
     if (sale.journalEntryId) {
-      const accounting = new AccountingEngine(req.db);
       await accounting.voidJournal(sale.journalEntryId, orgId, `Sale voided: ${reason}`, userId);
     }
 

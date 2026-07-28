@@ -5,6 +5,7 @@ import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import { ZodError } from 'zod';
+import { accessLogs } from '@ledgera/db';
 
 import databasePlugin from './plugins/database.js';
 import redisPlugin from './plugins/redis.js';
@@ -13,6 +14,7 @@ import authRoutes from './modules/auth/auth.routes.js';
 import organizationRoutes from './modules/organizations/org.routes.js';
 import accountingRoutes from './modules/accounting/accounting.routes.js';
 import inventoryRoutes from './modules/inventory/inventory.routes.js';
+import storeRequestsRoutes from './modules/inventory/store-requests.routes.js';
 import salesRoutes from './modules/sales/sales.routes.js';
 import purchasesRoutes from './modules/purchases/purchases.routes.js';
 import expensesRoutes from './modules/expenses/expenses.routes.js';
@@ -21,6 +23,7 @@ import bankingRoutes from './modules/banking/banking.routes.js';
 import reportsRoutes from './modules/reports/reports.routes.js';
 import billingRoutes from './modules/billing/billing.routes.js';
 import quotesRoutes from './modules/quotes/quotes.routes.js';
+import dailyCloseRoutes from './modules/daily-close/daily-close.routes.js';
 import auditRoutes from './modules/audit/audit.routes.js';
 import adminRoutes from './modules/admin/admin.routes.js';
 
@@ -36,7 +39,7 @@ const env = loadEnv();
 const PORT = env.PORT;
 const HOST = env.HOST;
 
-async function buildServer() {
+export async function buildServer() {
   const app = Fastify({
     logger: {
       level: env.NODE_ENV === 'production' ? 'warn' : 'info',
@@ -97,11 +100,35 @@ async function buildServer() {
     version: '0.1.0',
   }));
 
+  // ── Global access log ──────────────────────────────
+  // "Log every action by every user" safety net: every request is recorded
+  // here regardless of whether the route also writes a richer entry to
+  // auditLogs via logAudit() (see utils/audit.ts) — that table stays a
+  // clean business-event trail; this one is a forensic every-request log
+  // (also covers pre-auth/failed requests, e.g. failed logins). Uses
+  // app.adminDb (BYPASSRLS, its own connection) rather than req.db so it
+  // still fires even if the request's own transaction rolled back, and
+  // works before request.user exists.
+  app.addHook('onResponse', async (request, reply) => {
+    if (request.url === '/health') return;
+    await app.adminDb.insert(accessLogs).values({
+      organizationId: request.user?.orgId,
+      userId: request.user?.userId,
+      method: request.method,
+      path: request.routeOptions?.url ?? request.url,
+      statusCode: reply.statusCode,
+      durationMs: Math.round(reply.elapsedTime),
+      ip: request.ip,
+      userAgent: request.headers['user-agent'],
+    }).catch(() => {});
+  });
+
   // ── API routes ────────────────────────────────────
   await app.register(authRoutes,         { prefix: '/v1/auth' });
   await app.register(organizationRoutes, { prefix: '/v1/org' });
   await app.register(accountingRoutes,   { prefix: '/v1' });
   await app.register(inventoryRoutes,    { prefix: '/v1' });
+  await app.register(storeRequestsRoutes, { prefix: '/v1' });
   await app.register(salesRoutes,        { prefix: '/v1' });
   await app.register(purchasesRoutes,    { prefix: '/v1' });
   await app.register(expensesRoutes,     { prefix: '/v1' });
@@ -110,6 +137,7 @@ async function buildServer() {
   await app.register(reportsRoutes,      { prefix: '/v1/reports' });
   await app.register(billingRoutes,      { prefix: '/v1/billing' });
   await app.register(quotesRoutes,       { prefix: '/v1' });
+  await app.register(dailyCloseRoutes,   { prefix: '/v1' });
   await app.register(auditRoutes,        { prefix: '/v1' });
   await app.register(adminRoutes,        { prefix: '/v1/admin' });
 
@@ -163,4 +191,9 @@ async function start() {
   }
 }
 
-start();
+// Only auto-start when run directly (tsx/node), not when imported by tests
+// via buildServer() — otherwise every test run would also open a listening
+// socket and schedule the grace-period cron.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  start();
+}

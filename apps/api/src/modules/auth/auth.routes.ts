@@ -6,6 +6,7 @@ import { userSessions, organizations, organizationUsers, subscriptions } from '@
 import { AuthService } from './auth.service.js';
 import { authenticate } from '../../middleware/auth.js';
 import { UnauthorizedError, ValidationError, TooManyRequestsError } from '../../utils/errors.js';
+import { logAudit } from '../../utils/audit.js';
 
 const authRoutes: FastifyPluginAsync = async (app) => {
   // Pre-auth flows (register/login/verify/reset) have no tenant context —
@@ -167,6 +168,7 @@ const authRoutes: FastifyPluginAsync = async (app) => {
 
   // ── POST /auth/logout ────────────────────────────
   app.post('/logout', { preHandler: [authenticate] }, async (req, reply) => {
+    const { orgId, userId } = req.user;
     const token = req.cookies['refresh_token'];
     if (token) {
       await req.db
@@ -174,6 +176,15 @@ const authRoutes: FastifyPluginAsync = async (app) => {
         .set({ revokedAt: new Date() })
         .where(eq(userSessions.tokenHash, token));
     }
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'logout',
+      resourceType: 'user',
+      resourceId: userId,
+    });
+
     reply.clearCookie('refresh_token');
     return reply.send({ data: { success: true } });
   });

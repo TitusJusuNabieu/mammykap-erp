@@ -12,6 +12,7 @@ import { authenticate, requireMinRole } from '../../middleware/auth.js';
 import { NotFoundError, ValidationError } from '../../utils/errors.js';
 import { AccountingEngine } from '../accounting/accounting.engine.js';
 import { nextSequence } from '../../utils/sequence.js';
+import { logAudit } from '../../utils/audit.js';
 
 const bankingRoutes: FastifyPluginAsync = async (app) => {
 
@@ -46,6 +47,15 @@ const bankingRoutes: FastifyPluginAsync = async (app) => {
       branchId: body.branchId ?? userBranchId ?? undefined,
       currentBalance: String(body.openingBalance),
     }).returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'bank_account',
+      resourceId: bank!.id,
+      resourceNumber: bank!.accountNumber,
+    });
 
     return reply.status(201).send({ data: bank });
   });
@@ -152,6 +162,15 @@ const bankingRoutes: FastifyPluginAsync = async (app) => {
       }
     }
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'bank_transaction',
+      resourceId: txn!.id,
+      resourceNumber: txnNumber,
+    });
+
     return reply.status(201).send({ data: txn });
   });
 
@@ -168,7 +187,7 @@ const bankingRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/momo-wallets', { preHandler: [authenticate, requireMinRole('accountant')] }, async (req, reply) => {
-    const { orgId, branchId: userBranchId } = req.user;
+    const { orgId, userId, branchId: userBranchId } = req.user;
     const body = z.object({
       provider:     z.enum(['orange_money','afrimoney','qmoney']),
       walletNumber: z.string().min(1).max(50),
@@ -182,6 +201,15 @@ const bankingRoutes: FastifyPluginAsync = async (app) => {
       organizationId: orgId,
       branchId: body.branchId ?? userBranchId ?? undefined,
     }).returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'momo_wallet',
+      resourceId: wallet!.id,
+      resourceNumber: wallet!.walletNumber,
+    });
 
     return reply.status(201).send({ data: wallet });
   });
@@ -275,6 +303,15 @@ const bankingRoutes: FastifyPluginAsync = async (app) => {
         });
       }
     }
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'momo_transaction',
+      resourceId: txn!.id,
+      resourceNumber: txnNumber,
+    });
 
     return reply.status(201).send({ data: txn });
   });

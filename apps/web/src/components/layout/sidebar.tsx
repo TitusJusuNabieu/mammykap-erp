@@ -7,6 +7,7 @@ import {
   LayoutDashboard, ShoppingCart, Package, Users, Truck,
   Receipt, Building2, BarChart3, Settings,
   CreditCard, Smartphone, BookOpen, FileText, LogOut, ClipboardList,
+  PackageCheck, CalendarCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
@@ -19,6 +20,8 @@ const NAV = [
   { label: 'Quotes & Invoices', href: '/sales/quotes', icon: ClipboardList },
   { label: 'Purchases',   href: '/purchases',         icon: Truck },
   { label: 'Inventory',   href: '/inventory',         icon: Package },
+  { label: 'Store Requests', href: '/store-requests', icon: PackageCheck },
+  { label: 'Daily Close', href: '/daily-close',       icon: CalendarCheck },
   { label: 'Customers',   href: '/customers',         icon: Users },
   { label: 'Expenses',    href: '/expenses',          icon: Receipt },
   { label: 'Payroll',     href: '/payroll',           icon: CreditCard },

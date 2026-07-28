@@ -54,9 +54,19 @@ const payrollRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.post('/departments', { preHandler: [authenticate, requireMinRole('accountant')] }, async (req, reply) => {
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const { name } = z.object({ name: z.string().min(1).max(255) }).parse(req.body);
     const [dept] = await req.db.insert(departments).values({ organizationId: orgId, name }).returning();
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'department',
+      resourceId: dept!.id,
+      resourceNumber: dept!.name,
+    });
+
     return reply.status(201).send({ data: dept });
   });
 
@@ -97,6 +107,15 @@ const payrollRoutes: FastifyPluginAsync = async (app) => {
       employeeNumber,
     }).returning();
 
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'create',
+      resourceType: 'employee',
+      resourceId: emp!.id,
+      resourceNumber: emp!.employeeNumber,
+    });
+
     return reply.status(201).send({ data: emp });
   });
 
@@ -111,7 +130,7 @@ const payrollRoutes: FastifyPluginAsync = async (app) => {
 
   app.patch('/employees/:id', { preHandler: [authenticate, requireMinRole('accountant')] }, async (req) => {
     const { id } = req.params as { id: string };
-    const { orgId } = req.user;
+    const { orgId, userId } = req.user;
     const body = z.object({
       fullName:     z.string().optional(),
       phone:        z.string().optional(),
@@ -126,6 +145,17 @@ const payrollRoutes: FastifyPluginAsync = async (app) => {
       .returning();
 
     if (!updated) throw new NotFoundError('Employee');
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'employee',
+      resourceId: updated.id,
+      resourceNumber: updated.employeeNumber,
+      changes: body,
+    });
+
     return { data: updated };
   });
 
@@ -303,6 +333,15 @@ const payrollRoutes: FastifyPluginAsync = async (app) => {
         .set({ status: 'completed', processedBy: userId, processedAt: new Date() })
         .where(eq(payrollRuns.id, id));
     }
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'approve',
+      resourceType: 'payroll_run',
+      resourceId: id,
+      resourceNumber: run.runNumber,
+    });
 
     return { data: { success: true, runNumber: run.runNumber } };
   });

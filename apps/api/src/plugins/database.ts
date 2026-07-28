@@ -29,7 +29,18 @@ const databasePlugin: FastifyPluginAsync = async (fastify) => {
   fastify.addHook('onRequest', async (request) => {
     request.db = db;
   });
-  fastify.addHook('onResponse', async (request) => finalizeTenantTransaction(request, 'commit'));
+  // Commit on onSend, not onResponse — onResponse fires AFTER the response
+  // has already been sent to the client, so committing there means a
+  // caller can observe a success response before the write is actually
+  // durable/visible to other connections (a real race, not just a test
+  // artifact — e.g. a frontend that immediately re-fetches after a
+  // successful mutation could occasionally miss it). onSend runs before
+  // the response goes out, so the client only ever sees success once the
+  // transaction has truly committed. Must return the payload unchanged.
+  fastify.addHook('onSend', async (request, _reply, payload) => {
+    await finalizeTenantTransaction(request, 'commit');
+    return payload;
+  });
   fastify.addHook('onError', async (request) => finalizeTenantTransaction(request, 'rollback'));
   fastify.addHook('onTimeout', async (request) => finalizeTenantTransaction(request, 'rollback'));
 
