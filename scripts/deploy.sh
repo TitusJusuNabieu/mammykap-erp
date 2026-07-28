@@ -143,6 +143,7 @@ resolve_existing_env() {
   [[ -n "$existing_port" ]] && API_PORT="$existing_port"
   [[ -n "$existing_web_port" ]] && WEB_PORT="$existing_web_port"
   [[ -n "$existing_instance" ]] && INSTANCE="$existing_instance"
+  return 0
 }
 
 # ── 0b. Refuse to start on a port another LEDGERA instance already owns ──
@@ -164,7 +165,18 @@ check_ports_free() {
       }
     });
   ")"
-  [[ -n "$conflict" ]] && die "$conflict — pick a different --api-port/--web-port for this instance, or check --db-name is correct."
+  # NOTE: this must stay as an `if`, not a bare `[[ ]] && die` — as the last
+  # statement in the function, a bare `&&` guard whose condition evaluates
+  # false (the normal/no-conflict case) makes bash treat the function ITSELF
+  # as having failed under `set -e`, silently killing the whole script even
+  # though nothing is actually wrong. This exact bug is what broke every
+  # redeploy on a host where pm2 was already installed — see the ERR trap
+  # above, which (correctly) never fires for this because it's not a real
+  # error, just an artifact of how `set -e` reads a guard clause's status.
+  if [[ -n "$conflict" ]]; then
+    die "$conflict — pick a different --api-port/--web-port for this instance, or check --db-name is correct."
+  fi
+  return 0
 }
 
 # ── 0c. Warn (don't block) if --domain doesn't resolve here yet ──────────
@@ -186,6 +198,7 @@ check_dns() {
   elif [[ "$resolved_ip" != "$server_ip" ]]; then
     warn "$DOMAIN currently resolves to $resolved_ip, not this server ($server_ip) — HTTPS won't work until the A record is updated."
   fi
+  return 0
 }
 
 # ── 1. System dependencies (idempotent — skipped if already present) ──────
@@ -410,6 +423,7 @@ setup_pm2() {
   if ! pm2 startup 2>&1 | grep -q "already"; then
     warn "Run the 'sudo env PATH=...' command pm2 printed above once, so pm2 restarts LEDGERA automatically on server reboot."
   fi
+  return 0
 }
 
 setup_caddy() {
@@ -457,6 +471,7 @@ health_check() {
       warn "Public storefront (/v1/public/org) not reachable — check: pm2 logs $API_APP"
     fi
   fi
+  return 0
 }
 
 # ── Final summary — what actually got deployed and what to do next ───────
@@ -496,6 +511,7 @@ print_summary() {
     echo "      currently shows the placeholder starter-org details)."
     echo "   2. Add your products (with prices) under Inventory so the catalog isn't empty."
   fi
+  return 0
 }
 
 main() {
