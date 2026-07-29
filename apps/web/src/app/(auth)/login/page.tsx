@@ -184,12 +184,14 @@ function LoginForm() {
             </LoadingButton>
           </form>
 
-          <p className="text-center text-sm text-slate-500 mt-6">
-            No account?{' '}
-            <Link href="/register" className="text-brand-primary font-medium hover:underline">
-              Start free trial
-            </Link>
-          </p>
+          {process.env.NEXT_PUBLIC_DEPLOYMENT_MODE !== 'dedicated' && (
+            <p className="text-center text-sm text-slate-500 mt-6">
+              No account?{' '}
+              <Link href="/register" className="text-brand-primary font-medium hover:underline">
+                Start free trial
+              </Link>
+            </p>
+          )}
         </div>
       </div>
     </div>

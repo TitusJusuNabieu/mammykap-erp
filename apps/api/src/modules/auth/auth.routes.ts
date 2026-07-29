@@ -5,7 +5,7 @@ import { nanoid } from 'nanoid';
 import { userSessions, organizations, organizationUsers, subscriptions } from '@ledgera/db';
 import { AuthService } from './auth.service.js';
 import { authenticate } from '../../middleware/auth.js';
-import { UnauthorizedError, ValidationError, TooManyRequestsError } from '../../utils/errors.js';
+import { UnauthorizedError, ValidationError, TooManyRequestsError, ForbiddenError } from '../../utils/errors.js';
 import { logAudit } from '../../utils/audit.js';
 
 const authRoutes: FastifyPluginAsync = async (app) => {
@@ -16,6 +16,16 @@ const authRoutes: FastifyPluginAsync = async (app) => {
   // ── POST /auth/register ──────────────────────────
   // 3 registrations per IP per hour
   app.post('/register', { config: { rateLimit: { max: 3, timeWindow: '1 hour' } } }, async (req, reply) => {
+    // A dedicated deployment is contractually one business, already
+    // provisioned via db:seed-default-users — self-service signup would
+    // just create unrelated, orphaned organizations in that instance's own
+    // database. The frontend already hides the link for this mode (see
+    // (auth)/login and (auth)/register), but that's UI-only; enforce it
+    // here too since this endpoint is reachable directly.
+    if (process.env['DEPLOYMENT_MODE'] === 'dedicated') {
+      throw new ForbiddenError('Self-service registration is not available on this deployment.');
+    }
+
     const body = z.object({
       email: z.string().email(),
       password: z.string().min(8).max(100),

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -23,6 +23,8 @@ type FormValues = z.infer<typeof schema>;
 
 const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 
+const IS_DEDICATED = process.env.NEXT_PUBLIC_DEPLOYMENT_MODE === 'dedicated';
+
 export default function RegisterPage() {
   const router = useRouter();
   const [error,   setError]   = useState<string | null>(null);
@@ -33,6 +35,16 @@ export default function RegisterPage() {
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<FormValues>({
     resolver: zodResolver(schema),
   });
+
+  // Self-service signup creates a whole new organization — meaningless on a
+  // dedicated single-business deployment, which is already provisioned via
+  // db:seed-default-users. The API rejects this too (see auth.routes.ts),
+  // but redirecting here avoids showing a form that can only ever fail.
+  useEffect(() => {
+    if (IS_DEDICATED) router.replace('/login');
+  }, [router]);
+
+  if (IS_DEDICATED) return null;
 
   const onSubmit = async (data: FormValues) => {
     setError(null);

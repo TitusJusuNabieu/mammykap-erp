@@ -445,6 +445,10 @@ EOF
     cat > "$WEB_ENV" <<EOF
 NEXT_PUBLIC_API_URL=${next_api_url}
 NEXT_PUBLIC_APP_URL=${app_url}
+# Lets the frontend hide SaaS-only UI (e.g. self-service "start free
+# trial" registration) on a dedicated single-business deployment — see
+# apps/web/src/app/(auth)/login/page.tsx and .../register/page.tsx.
+NEXT_PUBLIC_DEPLOYMENT_MODE=${MODE}
 
 # Read by ecosystem.config.js only (pm2 process port) — see INSTANCE_NAME
 # note in apps/api/.env. Do not edit; not consumed by Next.js itself.
@@ -458,6 +462,12 @@ EOF
     # not just in Caddy's routing.
     correct_env_line "$WEB_ENV" "NEXT_PUBLIC_API_URL" "$next_api_url" "NEXT_PUBLIC_API_URL"
     correct_env_line "$WEB_ENV" "NEXT_PUBLIC_APP_URL" "$app_url" "NEXT_PUBLIC_APP_URL"
+    if grep -q "^NEXT_PUBLIC_DEPLOYMENT_MODE=" "$WEB_ENV"; then
+      correct_env_line "$WEB_ENV" "NEXT_PUBLIC_DEPLOYMENT_MODE" "$MODE" "NEXT_PUBLIC_DEPLOYMENT_MODE"
+    else
+      echo "NEXT_PUBLIC_DEPLOYMENT_MODE=${MODE}" >> "$WEB_ENV"
+      warn "Added missing NEXT_PUBLIC_DEPLOYMENT_MODE to $WEB_ENV."
+    fi
   fi
 }
 
