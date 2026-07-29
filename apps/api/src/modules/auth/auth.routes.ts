@@ -230,6 +230,39 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     return { data: req.user };
   });
 
+  // ── PATCH /auth/me ────────────────────────────────
+  // Self-service name/email edit. Distinct from PATCH /org/users/:id
+  // (org.routes.ts, org_owner-only — role/branch/active management for
+  // OTHER members) — this is any logged-in user editing themselves, and
+  // is what makes the org_owner role usable by an actual named person:
+  // org_owner can't be invited (see POST /org/invite's role enum), so the
+  // seeded default account (org-owner@ledgera.local, "Org Owner") is
+  // otherwise stuck with those placeholder values forever.
+  app.patch('/me', { preHandler: [authenticate] }, async (req) => {
+    const { userId, orgId } = req.user;
+    const body = z.object({
+      fullName: z.string().min(2).max(255).optional(),
+      email: z.string().email().optional(),
+    }).parse(req.body);
+
+    if (body.fullName === undefined && body.email === undefined) {
+      throw new ValidationError('Nothing to update');
+    }
+
+    const result = await svc.updateProfile(userId, body);
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'user',
+      resourceId: userId,
+      changes: body,
+    });
+
+    return { data: result };
+  });
+
   // ── POST /auth/change-password ───────────────────
   // For a logged-in user changing their own password — distinct from the
   // forgot-password email flow above, which requires SMTP to be

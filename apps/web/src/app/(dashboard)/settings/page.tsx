@@ -7,9 +7,10 @@ import { api, authApi } from '@/lib/api';
 import { cn, formatCurrency } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { LoadingButton } from '@/components/ui/spinner';
+import { useAuthStore } from '@/stores/auth.store';
 import {
   Upload, Link2, UserPlus, ShieldCheck,
-  UserX, Copy, CheckCircle2, KeyRound,
+  UserX, Copy, CheckCircle2, KeyRound, User,
 } from 'lucide-react';
 
 /* ─── Constants ────────────────────────────────────── */
@@ -52,7 +53,11 @@ const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg fo
 /* ─── Page ──────────────────────────────────────────── */
 export default function SettingsPage() {
   const qc = useQueryClient();
+  const authUser    = useAuthStore((s) => s.user);
+  const updateUser  = useAuthStore((s) => s.updateUser);
   const [tab, setTab]             = useState<Tab>('account');
+  const [fullName, setFullName] = useState(authUser?.fullName ?? '');
+  const [profileEmail, setProfileEmail] = useState(authUser?.email ?? '');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword]         = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -88,6 +93,12 @@ export default function SettingsPage() {
     if (settingsData?.data) settingsForm.reset(settingsData.data);
   }, [settingsData, settingsForm]);
 
+  // zustand's persist middleware hydrates from localStorage asynchronously,
+  // so authUser is still null on the very first render — sync once it lands.
+  useEffect(() => {
+    if (authUser) { setFullName(authUser.fullName); setProfileEmail(authUser.email); }
+  }, [authUser]);
+
   /* Mutations */
   const orgMutation = useMutation({
     mutationFn: (body: unknown) => api.patch('/v1/org', body),
@@ -120,6 +131,18 @@ export default function SettingsPage() {
     onError: (e) => toast.error((e as Error).message),
   });
 
+  const updateProfileMutation = useMutation({
+    mutationFn: () => authApi.updateProfile({
+      ...(fullName !== authUser?.fullName ? { fullName } : {}),
+      ...(profileEmail !== authUser?.email ? { email: profileEmail } : {}),
+    }),
+    onSuccess: (res) => {
+      updateUser({ fullName: res.data.fullName, email: res.data.email });
+      toast.success('Profile updated');
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
   const changePasswordMutation = useMutation({
     mutationFn: () => authApi.changePassword(currentPassword, newPassword),
     onSuccess: () => {
@@ -148,6 +171,9 @@ export default function SettingsPage() {
   const passwordsMismatch = newPassword.length > 0 && confirmPassword.length > 0 && newPassword !== confirmPassword;
   const canChangePassword = currentPassword.length > 0 && newPassword.length >= 8 && newPassword === confirmPassword && !changePasswordMutation.isPending;
 
+  const profileDirty = !!authUser && (fullName !== authUser.fullName || profileEmail !== authUser.email);
+  const canSaveProfile = profileDirty && fullName.trim().length >= 2 && /\S+@\S+\.\S+/.test(profileEmail) && !updateProfileMutation.isPending;
+
   return (
     <div className="space-y-5 max-w-2xl">
       <h1 className="text-xl font-bold text-slate-900">Settings</h1>
@@ -165,6 +191,52 @@ export default function SettingsPage() {
 
       {/* ── Account tab ──────────────────────────────── */}
       {tab === 'account' && (
+        <div className="space-y-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900 mb-1 flex items-center gap-2">
+            <User className="w-4 h-4 text-brand-primary" />
+            Profile
+          </h2>
+          <p className="text-xs text-slate-400 mb-5">
+            Your name and email as shown across the system.
+          </p>
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (canSaveProfile) updateProfileMutation.mutate(); }}
+            className="space-y-4 max-w-sm"
+          >
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Full name</label>
+              <input
+                type="text"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                autoComplete="name"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Email</label>
+              <input
+                type="email"
+                value={profileEmail}
+                onChange={(e) => setProfileEmail(e.target.value)}
+                autoComplete="email"
+                className={inputCls}
+              />
+              <p className="text-xs text-slate-400 mt-1">Changing this will mark your email as unverified.</p>
+            </div>
+            <LoadingButton
+              type="submit"
+              loading={updateProfileMutation.isPending}
+              loadingText="Saving…"
+              disabled={!canSaveProfile}
+              className="bg-brand-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-brand-light"
+            >
+              Save Profile
+            </LoadingButton>
+          </form>
+        </div>
+
         <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
           <h2 className="text-sm font-semibold text-slate-900 mb-1 flex items-center gap-2">
             <KeyRound className="w-4 h-4 text-brand-primary" />
@@ -219,6 +291,7 @@ export default function SettingsPage() {
               Change Password
             </LoadingButton>
           </form>
+        </div>
         </div>
       )}
 

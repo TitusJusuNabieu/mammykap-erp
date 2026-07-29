@@ -57,6 +57,8 @@ export const authApi = {
   resetPassword:  (token: string, password: string) => api.post('/v1/auth/reset-password', { token, password }),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post<{ data: { success: boolean } }>('/v1/auth/change-password', { currentPassword, newPassword }),
+  updateProfile: (body: { fullName?: string; email?: string }) =>
+    api.patch<{ data: { id: string; email: string; fullName: string; isEmailVerified: boolean } }>('/v1/auth/me', body),
 };
 
 // ── Products ────────────────────────────────────────

@@ -17,6 +17,7 @@ interface AuthState {
   user: User | null;
   accessToken: string | null;
   setAuth: (user: User, token: string) => void;
+  updateUser: (partial: Partial<User>) => void;
   clearAuth: () => void;
   isAuthenticated: boolean;
 }
@@ -37,6 +38,11 @@ export const useAuthStore = create<AuthState>()(
           document.cookie = 'session=1; path=/; SameSite=Lax; max-age=' + (7 * 24 * 60 * 60);
         }
         set({ user, accessToken });
+      },
+      updateUser: (partial) => {
+        const current = get().user;
+        if (!current) return;
+        set({ user: { ...current, ...partial } });
       },
       clearAuth: () => {
         if (typeof window !== 'undefined') {

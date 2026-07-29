@@ -375,6 +375,43 @@ export class AuthService {
     return { success: true };
   }
 
+  async updateProfile(userId: string, updates: { fullName?: string; email?: string }) {
+    if (updates.email) {
+      const normalized = updates.email.toLowerCase();
+      const existing = await this.db
+        .select({ id: users.id })
+        .from(users)
+        .where(eq(users.email, normalized))
+        .limit(1);
+      if (existing.length > 0 && existing[0]!.id !== userId) {
+        throw new ConflictError('An account with this email already exists');
+      }
+    }
+
+    const [updated] = await this.db
+      .update(users)
+      .set({
+        ...(updates.fullName !== undefined ? { fullName: updates.fullName } : {}),
+        // Changing the email invalidates the previous verification —
+        // there's no re-verification flow wired up yet (needs SMTP), so
+        // this just reflects reality rather than leaving a stale "verified"
+        // flag on an address that was never actually confirmed.
+        ...(updates.email !== undefined ? { email: updates.email.toLowerCase(), isEmailVerified: false } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+
+    if (!updated) throw new NotFoundError('User');
+
+    return {
+      id: updated.id,
+      email: updated.email,
+      fullName: updated.fullName,
+      isEmailVerified: updated.isEmailVerified,
+    };
+  }
+
   private slugify(name: string): string {
     return name
       .toLowerCase()
