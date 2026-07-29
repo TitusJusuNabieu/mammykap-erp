@@ -45,6 +45,15 @@ module.exports = {
       name: `ledgera-api${suffix}`,
       cwd: path.join(__dirname, 'apps/api'),
       script: 'node_modules/.bin/tsx',
+      // pnpm's node_modules/.bin/* entries are shell-script shims, not
+      // plain JS files — without this, pm2 defaults to running the
+      // `script` through Node's own module loader (since it has no
+      // recognized extension), which chokes trying to parse shell syntax
+      // as JavaScript. 'none' tells pm2 to exec it directly instead,
+      // respecting its own shebang. tsx's shim happens not to hit this in
+      // practice, but there's no guarantee that holds across pnpm/tsx
+      // versions, so it's set here too for the same reason as next below.
+      interpreter: 'none',
       args: 'src/server.ts',
       env: apiEnv,
       max_restarts: 10,
@@ -55,6 +64,12 @@ module.exports = {
       name: `ledgera-web${suffix}`,
       cwd: path.join(__dirname, 'apps/web'),
       script: 'node_modules/.bin/next',
+      // See the identical note on the api app above — this is the one
+      // that actually crash-loops without it (492 restarts observed):
+      // Node tries to `require()` next's shell-script shim as JavaScript
+      // and fails with "SyntaxError: missing ) after argument list" on
+      // its `basedir=$(dirname ...)` line.
+      interpreter: 'none',
       args: `start -p ${webPort}`,
       env: { NODE_ENV: 'production', PORT: webPort, ...webEnv },
       max_restarts: 10,
