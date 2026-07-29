@@ -48,47 +48,49 @@ export default async function LandingPage() {
       </header>
 
       {/* ── Hero ───────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-4 pt-20 pb-16 text-center">
-        <div className="inline-flex items-center gap-2 bg-brand-primary/10 text-brand-primary px-3 py-1.5 rounded-full text-xs font-semibold mb-6">
-          <MapPin className="w-3.5 h-3.5" />
-          Based in Bo, Sierra Leone
-        </div>
-        <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight tracking-tight mb-6">
-          Quality Building Materials
-          <span className="text-brand-primary block">For Every Project</span>
-        </h1>
-        <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
-          Cement, roofing sheets, rods, tiles and everything else you need for your build —
-          all in one place. Browse what we have in stock, request what you need online,
-          then come in and pay when you&rsquo;re ready to collect.
-        </p>
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <Link href="/catalog" className="flex items-center gap-2 bg-brand-primary text-white px-8 py-3.5 rounded-xl font-semibold text-base hover:bg-brand-light transition-colors shadow-lg shadow-brand-primary/20">
-            <ShoppingBag className="w-4 h-4" />
-            Browse the Catalog
-          </Link>
-          <a href={ORG.mapUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-700 font-medium px-6 py-3.5 rounded-xl border border-slate-200 hover:bg-slate-50 transition-colors">
-            <MapPin className="w-4 h-4" />
-            Get Directions
-          </a>
+      <section className="bg-gradient-to-b from-brand-primary/5 to-white">
+        <div className="max-w-6xl mx-auto px-4 pt-14 pb-14 text-center">
+          <div className="inline-flex items-center gap-2 bg-brand-primary/10 text-brand-primary px-3 py-1.5 rounded-full text-xs font-semibold mb-5">
+            <MapPin className="w-3.5 h-3.5" />
+            Based in Bo, Sierra Leone
+          </div>
+          <h1 className="text-4xl md:text-5xl font-extrabold text-slate-900 leading-tight tracking-tight mb-4">
+            Quality Building Materials
+            <span className="text-brand-primary block">For Every Project</span>
+          </h1>
+          <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-8 leading-relaxed">
+            Cement, roofing sheets, rods, tiles and everything else you need for your build —
+            all in one place. Browse what we have in stock, request what you need online,
+            then come in and pay when you&rsquo;re ready to collect.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <Link href="/catalog" className="flex items-center gap-2 bg-brand-primary text-white px-8 py-3.5 rounded-xl font-semibold text-base hover:bg-brand-light transition-colors shadow-lg shadow-brand-primary/20">
+              <ShoppingBag className="w-4 h-4" />
+              Browse the Catalog
+            </Link>
+            <a href={ORG.mapUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-slate-700 font-medium px-6 py-3.5 rounded-xl border border-slate-200 hover:bg-white transition-colors">
+              <MapPin className="w-4 h-4" />
+              Get Directions
+            </a>
+          </div>
         </div>
       </section>
 
       {/* ── How it works ───────────────────────────────── */}
-      <section id="how-it-works" className="bg-slate-50 py-20">
+      <section id="how-it-works" className="bg-slate-50 py-14">
         <div className="max-w-5xl mx-auto px-4">
-          <div className="text-center mb-14">
-            <h2 className="text-3xl font-extrabold text-slate-900 mb-3">How it works</h2>
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-extrabold text-slate-900 mb-2">How it works</h2>
             <p className="text-slate-500 text-lg">No online payment needed — pay and collect in person, at your convenience.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {HOW_IT_WORKS.map(({ icon: Icon, step, title, description }) => (
-              <div key={title} className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm text-center">
-                <div className="w-11 h-11 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center mb-4 mx-auto">
+              <div key={title} className="bg-white rounded-2xl p-5 border border-slate-100 shadow-sm text-center">
+                <div className="w-11 h-11 rounded-xl bg-brand-primary/10 text-brand-primary flex items-center justify-center mb-3 mx-auto">
                   <Icon className="w-5 h-5" />
                 </div>
                 <div className="text-xs font-bold text-brand-primary uppercase tracking-wide mb-1">Step {step}</div>
-                <h3 className="font-bold text-slate-900 mb-2">{title}</h3>
+                <h3 className="font-bold text-slate-900 mb-1.5">{title}</h3>
                 <p className="text-slate-500 text-sm leading-relaxed">{description}</p>
               </div>
             ))}
@@ -97,11 +99,11 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Why us ─────────────────────────────────────── */}
-      <section className="py-20 max-w-6xl mx-auto px-4">
-        <div className="text-center mb-14">
-          <h2 className="text-3xl font-extrabold text-slate-900 mb-3">Why builders choose {ORG.name}</h2>
+      <section className="py-14 max-w-6xl mx-auto px-4">
+        <div className="text-center mb-10">
+          <h2 className="text-3xl font-extrabold text-slate-900 mb-2">Why builders choose {ORG.name}</h2>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-slate-50 rounded-3xl p-8">
           {WHY_ITEMS.map(({ icon: Icon, title, desc }) => (
             <div key={title} className="flex gap-3">
               <div className="w-10 h-10 rounded-lg bg-brand-secondary/10 text-brand-secondary flex items-center justify-center flex-shrink-0">
@@ -117,10 +119,10 @@ export default async function LandingPage() {
       </section>
 
       {/* ── Visit us ───────────────────────────────────── */}
-      <section id="visit" className="bg-gradient-to-br from-brand-navy to-brand-primary py-20">
+      <section id="visit" className="bg-gradient-to-br from-brand-navy to-brand-primary py-16">
         <div className="max-w-4xl mx-auto px-4">
-          <div className="text-center mb-10">
-            <h2 className="text-3xl font-extrabold text-white mb-3">Visit our shop</h2>
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-extrabold text-white mb-2">Visit our shop</h2>
             <p className="text-white/70 text-lg">Come see our full range in person, or bring your purchase request to pay and collect.</p>
           </div>
           <div className="grid sm:grid-cols-3 gap-4">

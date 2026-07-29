@@ -104,9 +104,9 @@ export default function CatalogPage() {
       </header>
 
       {/* Catalog grid */}
-      <div className="max-w-6xl mx-auto px-4 py-8">
+      <div className="max-w-6xl mx-auto px-4 py-5">
         <h1 className="text-xl font-bold text-slate-900 mb-1">Our Catalog</h1>
-        <p className="text-sm text-slate-500 mb-6">Add items to a request, then submit — pay and collect in person at the shop.</p>
+        <p className="text-sm text-slate-500 mb-4">Add items to a request, then submit — pay and collect in person at the shop.</p>
 
         {isLoading ? (
           <div className="py-16 text-center text-slate-400">Loading…</div>
@@ -116,12 +116,12 @@ export default function CatalogPage() {
             <p>No items found</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {items.map((item) => {
               const meta = STATUS_META[item.status];
               const inCart = cart.find((l) => l.productId === item.id);
               return (
-                <div key={item.id} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col">
+                <div key={item.id} className="bg-white rounded-xl border border-slate-200 p-3.5 shadow-sm flex flex-col">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', meta.color)}>{meta.label}</span>
                     {item.category && <span className="text-[10px] text-slate-400 truncate">{item.category}</span>}
