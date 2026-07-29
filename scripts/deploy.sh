@@ -510,13 +510,19 @@ build_web() {
 }
 
 setup_pm2() {
-  log "Starting/reloading processes via pm2 ($API_APP, $WEB_APP)"
+  log "Starting processes via pm2 ($API_APP, $WEB_APP)"
   cd "$REPO_ROOT"
-  if pm2 describe "$API_APP" >/dev/null 2>&1; then
-    pm2 reload ecosystem.config.js
-  else
-    pm2 start ecosystem.config.js
-  fi
+  # `pm2 reload` is built for cluster mode's rolling restart and is
+  # unreliable for a fork-mode single-instance app that's already
+  # crash-looping — observed in practice: it can silently fail to apply an
+  # updated ecosystem.config.js to a process stuck restarting ("Process 1
+  # not found" mid-reload), leaving the OLD broken registration running.
+  # Delete-then-start guarantees a clean process registration from the
+  # current ecosystem.config.js every deploy, with no real zero-downtime
+  # benefit lost — fork mode has no rolling handoff to give up here, there's
+  # only one instance of each app either way.
+  pm2 delete "$API_APP" "$WEB_APP" >/dev/null 2>&1 || true
+  pm2 start ecosystem.config.js
   pm2 save
 
   if ! pm2 startup 2>&1 | grep -q "already"; then
