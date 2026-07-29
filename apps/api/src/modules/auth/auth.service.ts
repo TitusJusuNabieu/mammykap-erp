@@ -355,6 +355,26 @@ export class AuthService {
     return { success: true };
   }
 
+  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+
+    if (!user?.passwordHash) throw new UnauthorizedError('Account has no password set');
+    if (!compareSync(currentPassword, user.passwordHash)) {
+      throw new UnauthorizedError('Current password is incorrect');
+    }
+
+    await this.db
+      .update(users)
+      .set({ passwordHash: hashSync(newPassword, 12) })
+      .where(eq(users.id, userId));
+
+    return { success: true };
+  }
+
   private slugify(name: string): string {
     return name
       .toLowerCase()

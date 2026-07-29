@@ -220,6 +220,31 @@ const authRoutes: FastifyPluginAsync = async (app) => {
     return { data: req.user };
   });
 
+  // ── POST /auth/change-password ───────────────────
+  // For a logged-in user changing their own password — distinct from the
+  // forgot-password email flow above, which requires SMTP to be
+  // configured. This needs nothing but the current session.
+  app.post('/change-password', { preHandler: [authenticate] }, async (req) => {
+    const { userId, orgId } = req.user;
+    const { currentPassword, newPassword } = z.object({
+      currentPassword: z.string().min(1),
+      newPassword: z.string().min(8).max(100),
+    }).parse(req.body);
+
+    const result = await svc.changePassword(userId, currentPassword, newPassword);
+
+    await logAudit(req.db, {
+      organizationId: orgId,
+      userId,
+      action: 'update',
+      resourceType: 'user',
+      resourceId: userId,
+      changes: { field: 'password' },
+    });
+
+    return { data: result };
+  });
+
   // ── GET /auth/org-brand?slug=acme ──────────────────
   // Public endpoint — no auth required. Returns minimal org branding for the
   // subdomain login page so visitors see the right logo + name.

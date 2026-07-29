@@ -3,13 +3,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
-import { api } from '@/lib/api';
+import { api, authApi } from '@/lib/api';
 import { cn, formatCurrency } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { LoadingButton } from '@/components/ui/spinner';
 import {
   Upload, Link2, UserPlus, ShieldCheck,
-  UserX, Copy, CheckCircle2,
+  UserX, Copy, CheckCircle2, KeyRound,
 } from 'lucide-react';
 
 /* ─── Constants ────────────────────────────────────── */
@@ -44,7 +44,7 @@ const ROLE_COLORS: Record<string, string> = {
   viewer:            'bg-slate-100 text-slate-500',
 };
 
-type Tab = 'org' | 'print' | 'team' | 'billing';
+type Tab = 'account' | 'org' | 'print' | 'team' | 'billing';
 
 /* ─── Input helper ──────────────────────────────────── */
 const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/20 focus:border-brand-primary transition-colors';
@@ -52,7 +52,10 @@ const inputCls = 'w-full px-3 py-2 text-sm border border-slate-200 rounded-lg fo
 /* ─── Page ──────────────────────────────────────────── */
 export default function SettingsPage() {
   const qc = useQueryClient();
-  const [tab, setTab]             = useState<Tab>('org');
+  const [tab, setTab]             = useState<Tab>('account');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword]         = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [selectedPlan, setSelectedPlan] = useState('starter');
   const [logoPreview, setLogoPreview]   = useState<string | null>(null);
   const [showInvite, setShowInvite]     = useState(false);
@@ -117,6 +120,15 @@ export default function SettingsPage() {
     onError: (e) => toast.error((e as Error).message),
   });
 
+  const changePasswordMutation = useMutation({
+    mutationFn: () => authApi.changePassword(currentPassword, newPassword),
+    onSuccess: () => {
+      toast.success('Password changed');
+      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
   const copyLoginUrl = () => {
     if (!loginUrl) return;
     navigator.clipboard.writeText(loginUrl).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
@@ -126,11 +138,15 @@ export default function SettingsPage() {
   const members = (usersData?.data ?? []) as Array<Record<string, unknown>>;
 
   const TABS: { id: Tab; label: string }[] = [
+    { id: 'account', label: 'Account' },
     { id: 'org',     label: 'Organisation' },
     { id: 'print',   label: 'Receipt & Invoice' },
     { id: 'team',    label: 'Team' },
     { id: 'billing', label: 'Billing' },
   ];
+
+  const passwordsMismatch = newPassword.length > 0 && confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const canChangePassword = currentPassword.length > 0 && newPassword.length >= 8 && newPassword === confirmPassword && !changePasswordMutation.isPending;
 
   return (
     <div className="space-y-5 max-w-2xl">
@@ -146,6 +162,65 @@ export default function SettingsPage() {
           </button>
         ))}
       </div>
+
+      {/* ── Account tab ──────────────────────────────── */}
+      {tab === 'account' && (
+        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+          <h2 className="text-sm font-semibold text-slate-900 mb-1 flex items-center gap-2">
+            <KeyRound className="w-4 h-4 text-brand-primary" />
+            Change Password
+          </h2>
+          <p className="text-xs text-slate-400 mb-5">
+            If you&rsquo;re still using a default password from initial setup, change it here.
+          </p>
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (canChangePassword) changePasswordMutation.mutate(); }}
+            className="space-y-4 max-w-sm"
+          >
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Current password</label>
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
+                autoComplete="current-password"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">New password</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+              <p className="text-xs text-slate-400 mt-1">At least 8 characters.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-slate-600 block mb-1">Confirm new password</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                className={inputCls}
+              />
+              {passwordsMismatch && <p className="text-xs text-red-600 mt-1">Passwords don&rsquo;t match.</p>}
+            </div>
+            <LoadingButton
+              type="submit"
+              loading={changePasswordMutation.isPending}
+              loadingText="Saving…"
+              disabled={!canChangePassword}
+              className="bg-brand-primary text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-brand-light"
+            >
+              Change Password
+            </LoadingButton>
+          </form>
+        </div>
+      )}
 
       {/* ── Organisation tab ─────────────────────────── */}
       {tab === 'org' && (
