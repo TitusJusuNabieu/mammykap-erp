@@ -449,14 +449,42 @@ install_app_deps() {
   (cd "$REPO_ROOT" && pnpm install --frozen-lockfile)
 }
 
+# packages/db's scripts (migrate.ts, seed-default-users.ts) read
+# DATABASE_URL/DATABASE_ADMIN_URL/DATABASE_MIGRATOR_URL straight from
+# process.env, with no .env loading of their own — unlike the running app,
+# which gets apps/api/.env injected by pm2 via ecosystem.config.js's own
+# loadEnvFile() helper. Run directly via pnpm from this script, these
+# one-off CLI invocations would otherwise see none of those variables set
+# at all, and migrate.ts silently falls back to its own hardcoded
+# local-dev default connection string — producing a confusing "password
+# authentication failed" against a role/database that was never even the
+# one actually being targeted.
+#
+# Parses KEY=VALUE lines and exports them directly (mirrors
+# ecosystem.config.js's own loadEnvFile()) rather than `source`-ing the
+# file as shell code — a value containing a space or other shell-special
+# character (e.g. a manually-set SMTP_PASS) would otherwise be silently
+# misparsed or, worse, executed.
+load_env_file() {
+  local file="$1" line key value
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    [[ "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    export "$key=$value"
+  done < "$file"
+}
+
 run_migrations() {
   log "Running database migrations"
-  (cd "$REPO_ROOT" && pnpm --filter @ledgera/db db:migrate)
+  (cd "$REPO_ROOT" && load_env_file "$API_ENV" && pnpm --filter @ledgera/db db:migrate)
 }
 
 seed_default_users() {
   log "Seeding a default user per role (only runs once, on a genuinely empty database)"
-  (cd "$REPO_ROOT" && pnpm --filter @ledgera/db db:seed-default-users)
+  (cd "$REPO_ROOT" && load_env_file "$API_ENV" && pnpm --filter @ledgera/db db:seed-default-users)
 }
 
 build_web() {
