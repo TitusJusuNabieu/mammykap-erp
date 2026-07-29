@@ -340,6 +340,19 @@ setup_database() {
   fi
 }
 
+# Corrects one KEY=VALUE line in an already-existing env file if it doesn't
+# match the given value, warning about it — used only for the handful of
+# lines in setup_env() below that must always reflect the CURRENT deploy
+# settings rather than stay frozen at whatever they were on first deploy.
+correct_env_line() {
+  local file="$1" key="$2" value="$3" description="$4"
+  if ! grep -qF "${key}=${value}" "$file"; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file"
+    rm -f "${file}.bak"
+    warn "$description in $file didn't match the current settings — corrected it automatically."
+  fi
+}
+
 # ── 3. Env files (generated once, never overwritten on redeploy) ─────────
 setup_env() {
   log "Setting up environment files"
@@ -411,22 +424,20 @@ EOF
   else
     echo "$API_ENV already exists — leaving it untouched"
 
-    # The one deliberate exception to "never rewritten": DATABASE_MIGRATOR_URL
-    # is the one line nothing else depends on staying stable (it's used only
-    # for running migrations, never by the running app), and it's exactly
-    # the line most likely to have been written wrong by an earlier
-    # interrupted run (the placeholder CHANGE_ME_MIGRATOR_PASSWORD, or a
-    # password that predates setup_database()'s reconciliation above).
-    # Keep it correct on every run instead of requiring a manual fix.
+    # A few specific lines are the deliberate exception to "never
+    # rewritten": nothing but this deploy script itself depends on them
+    # staying stable, and they're exactly the ones most likely to have
+    # been written wrong by an earlier interrupted run, or to have gone
+    # stale after a legitimate change (most commonly: first deploying
+    # without --domain, then adding one later — APP_URL/API_URL would
+    # otherwise stay frozen at localhost forever, silently breaking CORS
+    # and every API call the browser makes once a real domain is live).
     if [[ "$owner_pass" != "CHANGE_ME_MIGRATOR_PASSWORD" ]]; then
-      local correct_migrator_url="postgres://ledgera:${owner_pass}@localhost:5432/${DB_NAME}"
-      if ! grep -qF "DATABASE_MIGRATOR_URL=${correct_migrator_url}" "$API_ENV"; then
-        sed -i.bak "s|^DATABASE_MIGRATOR_URL=.*|DATABASE_MIGRATOR_URL=${correct_migrator_url}|" "$API_ENV"
-        rm -f "${API_ENV}.bak"
-        chmod 600 "$API_ENV"
-        warn "DATABASE_MIGRATOR_URL in $API_ENV didn't match the current 'ledgera' role password — corrected it automatically."
-      fi
+      correct_env_line "$API_ENV" "DATABASE_MIGRATOR_URL" "postgres://ledgera:${owner_pass}@localhost:5432/${DB_NAME}" "'ledgera' role password"
     fi
+    correct_env_line "$API_ENV" "APP_URL" "$app_url" "APP_URL"
+    correct_env_line "$API_ENV" "API_URL" "$api_url" "API_URL"
+    chmod 600 "$API_ENV"
   fi
 
   if [[ ! -f "$WEB_ENV" ]]; then
@@ -441,6 +452,12 @@ WEB_PORT=${WEB_PORT}
 EOF
   else
     echo "$WEB_ENV already exists — leaving it untouched"
+    # NEXT_PUBLIC_* values are baked into the client bundle at build time
+    # (build_web() runs on every deploy) — correcting these here is what
+    # actually makes a later --domain addition take effect in the browser,
+    # not just in Caddy's routing.
+    correct_env_line "$WEB_ENV" "NEXT_PUBLIC_API_URL" "$next_api_url" "NEXT_PUBLIC_API_URL"
+    correct_env_line "$WEB_ENV" "NEXT_PUBLIC_APP_URL" "$app_url" "NEXT_PUBLIC_APP_URL"
   fi
 }
 
@@ -531,23 +548,40 @@ EOF
   echo "Caddy will request HTTPS certs automatically once DNS for ${DOMAIN} and api.${DOMAIN} points at this server."
 }
 
+# Polls a URL until it responds or the attempt budget runs out. A single
+# fixed sleep-then-check (the old behavior) produces false-negative
+# warnings on an otherwise perfectly healthy deploy — a cold pm2 start
+# (freshly-built Next.js app, or a Fastify app opening its DB/Redis
+# connections) can easily take longer than a couple of seconds, especially
+# under load (a fresh `next build` finishing right beforehand is exactly
+# the kind of CPU spike that slows the next process's cold start too).
+wait_for_url() {
+  local url="$1" attempts="${2:-15}" delay="${3:-1}"
+  local i
+  for ((i = 0; i < attempts; i++)); do
+    curl -fsS "$url" >/dev/null 2>&1 && return 0
+    sleep "$delay"
+  done
+  return 1
+}
+
 health_check() {
   log "Health check"
-  sleep 2
-  if curl -fsS "http://localhost:${API_PORT}/health" >/dev/null 2>&1; then
+  if wait_for_url "http://localhost:${API_PORT}/health"; then
     echo "API: healthy"
   else
-    warn "API health check failed — check: pm2 logs $API_APP"
+    warn "API health check failed after 15s — check: pm2 logs $API_APP"
   fi
-  if curl -fsS "http://localhost:${WEB_PORT}" >/dev/null 2>&1; then
+  if wait_for_url "http://localhost:${WEB_PORT}"; then
     echo "Web: reachable"
   else
-    warn "Web app not reachable on :${WEB_PORT} — check: pm2 logs $WEB_APP"
+    warn "Web app not reachable on :${WEB_PORT} after 15s — check: pm2 logs $WEB_APP"
   fi
   # Public storefront (/v1/public/*) only serves in dedicated mode — see
-  # apps/api/src/modules/public/public.routes.ts.
+  # apps/api/src/modules/public/public.routes.ts. Shorter budget since the
+  # API check above already established (or didn't) that the process is up.
   if [[ "$MODE" == "dedicated" ]]; then
-    if curl -fsS "http://localhost:${API_PORT}/v1/public/org" >/dev/null 2>&1; then
+    if wait_for_url "http://localhost:${API_PORT}/v1/public/org" 5 1; then
       echo "Public storefront: reachable"
     else
       warn "Public storefront (/v1/public/org) not reachable — check: pm2 logs $API_APP"
