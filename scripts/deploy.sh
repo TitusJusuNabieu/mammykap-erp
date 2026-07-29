@@ -24,12 +24,15 @@
 #     --db-name=ledgera_acme --api-port=3011 --web-port=3010
 #
 # Safe to re-run: every step below checks for existing state before acting.
-# Re-running never regenerates secrets, drops data, or re-creates roles that
-# already exist. If a checkout was already deployed and you pass a different
-# --mode/--api-port/--web-port than what it's actually running, the script
-# refuses to continue (those flags are silently ignored on redeploy since
-# .env is never rewritten) — pass --force to acknowledge and proceed with the
-# EXISTING values instead.
+# Re-running never regenerates secrets or drops data. If a checkout was
+# already deployed and you pass a different --mode/--api-port/--web-port
+# than what it's actually running, the script refuses to continue unless
+# you pass --force. Mode changes are NEVER applied even with --force (it
+# flips billing/subscription enforcement — too consequential for a flag).
+# Port changes ARE applied with --force — e.g. to resolve a port collision
+# with an unrelated app on the same host:
+#   ./scripts/deploy.sh dedicated --db-name=mamykab --domain=mamykab.com \
+#     --web-port=3010 --force
 
 set -euo pipefail
 
@@ -106,11 +109,20 @@ else
 fi
 
 # ── 0. Reconcile against an existing deploy of this checkout ─────────────
-# .env files are only ever generated once (see setup_env) and never rewritten,
-# so if this checkout was already deployed, MODE/API_PORT/WEB_PORT/INSTANCE
-# below get overwritten with whatever's actually running rather than what was
-# just passed on the command line — unless it's the first deploy, or --force
-# was given to knowingly re-point this checkout at different values.
+# .env files are only ever generated once (see setup_env), so if this
+# checkout was already deployed, MODE/API_PORT/WEB_PORT/INSTANCE below get
+# reconciled against whatever's actually running — unless it's the first
+# deploy, or --force was given to knowingly change something.
+#
+# MODE is never changed even with --force (it flips billing/subscription
+# enforcement — too consequential to change via a flag on a redeploy).
+# API_PORT/WEB_PORT ARE meant to be changeable via --force: pass the new
+# port and --force, and setup_env()'s correct_env_line() calls (further
+# down) propagate it into the env files, Caddy config gets regenerated
+# with it, and setup_pm2()'s delete-then-start picks it up — e.g. to
+# resolve a port collision with an unrelated app on the same host:
+#   ./scripts/deploy.sh dedicated --db-name=mamykab --domain=mamykab.com \
+#     --web-port=3010 --force
 resolve_existing_env() {
   [[ ! -f "$API_ENV" ]] && return 0
 
@@ -122,7 +134,7 @@ resolve_existing_env() {
 
   local mismatches=()
   [[ -n "$existing_mode" && "$existing_mode" != "$MODE" ]] && \
-    mismatches+=("mode: deployed as '$existing_mode', you passed '$MODE' — this flips billing/subscription enforcement")
+    mismatches+=("mode: deployed as '$existing_mode', you passed '$MODE' — this flips billing/subscription enforcement, and will NOT change even with --force")
   [[ -n "$existing_port" && "$existing_port" != "$API_PORT" ]] && \
     mismatches+=("API port: deployed on $existing_port, you passed --api-port=$API_PORT")
   [[ -n "$existing_web_port" && "$existing_web_port" != "$WEB_PORT" ]] && \
@@ -132,17 +144,21 @@ resolve_existing_env() {
     warn "This checkout was already deployed with different settings than what you just passed:"
     for m in "${mismatches[@]}"; do warn "  - $m"; done
     if [[ "$FORCE" != "1" ]]; then
-      die "Refusing to continue — these flags would be silently ignored (env files are never auto-rewritten). Re-run with --force to proceed using the EXISTING values, or fix your flags/directory."
+      die "Refusing to continue — re-run with --force to actually apply the new --api-port/--web-port (mode changes are never applied, even with --force), or fix your flags/directory."
     fi
-    warn "--force given — proceeding with the EXISTING values above."
+    warn "--force given — applying the new port(s) above."
   fi
 
-  # Whatever's already deployed wins, so every later step (ports, pm2 names,
-  # Caddy, health check) targets what's actually running.
+  # MODE always stays whatever's actually deployed. Ports only fall back to
+  # the existing value when NOT forcing a change — under --force, the
+  # values already parsed from this run's command line are left as-is so
+  # the rest of the script (env files, Caddy, pm2) reconfigures onto them.
   [[ -n "$existing_mode" ]] && MODE="$existing_mode"
-  [[ -n "$existing_port" ]] && API_PORT="$existing_port"
-  [[ -n "$existing_web_port" ]] && WEB_PORT="$existing_web_port"
   [[ -n "$existing_instance" ]] && INSTANCE="$existing_instance"
+  if [[ "$FORCE" != "1" ]]; then
+    [[ -n "$existing_port" ]] && API_PORT="$existing_port"
+    [[ -n "$existing_web_port" ]] && WEB_PORT="$existing_web_port"
+  fi
   return 0
 }
 
@@ -437,6 +453,7 @@ EOF
     fi
     correct_env_line "$API_ENV" "APP_URL" "$app_url" "APP_URL"
     correct_env_line "$API_ENV" "API_URL" "$api_url" "API_URL"
+    correct_env_line "$API_ENV" "PORT" "$API_PORT" "API port"
     chmod 600 "$API_ENV"
   fi
 
@@ -462,6 +479,7 @@ EOF
     # not just in Caddy's routing.
     correct_env_line "$WEB_ENV" "NEXT_PUBLIC_API_URL" "$next_api_url" "NEXT_PUBLIC_API_URL"
     correct_env_line "$WEB_ENV" "NEXT_PUBLIC_APP_URL" "$app_url" "NEXT_PUBLIC_APP_URL"
+    correct_env_line "$WEB_ENV" "WEB_PORT" "$WEB_PORT" "web port"
     if grep -q "^NEXT_PUBLIC_DEPLOYMENT_MODE=" "$WEB_ENV"; then
       correct_env_line "$WEB_ENV" "NEXT_PUBLIC_DEPLOYMENT_MODE" "$MODE" "NEXT_PUBLIC_DEPLOYMENT_MODE"
     else
