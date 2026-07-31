@@ -310,7 +310,9 @@ const salesRoutes: FastifyPluginAsync = async (app) => {
       resourceNumber: saleNumber,
     });
 
-    return reply.status(201).send({ data: { ...sale, saleNumber } });
+    return reply.status(201).send({
+      data: { ...sale, saleNumber, storeRequestNumber, storeRequestId: storeRequest.id },
+    });
   });
 
   // ── GET /sales/:id ───────────────────────────────

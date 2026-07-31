@@ -12,6 +12,7 @@ import { usePOSStore, type CartLine, type CartPayment } from '@/stores/pos.store
 import { formatCurrency, cn } from '@/lib/utils';
 import { useAuthStore } from '@/stores/auth.store';
 import { PrintableReceipt, usePrint, type ReceiptData, type ReceiptOrg, type ReceiptSettings } from '@/components/print/PrintableReceipt';
+import { PrintableCollectionNote, type CollectionNoteData } from '@/components/print/PrintableCollectionNote';
 
 const PAYMENT_METHODS = [
   { value: 'cash',         label: 'Cash' },
@@ -37,7 +38,7 @@ function POSPageInner() {
   // staff supply the resulting store request (see /store-requests) — this
   // just records when the customer expects to collect.
   const [expectedCollectionDate, setExpectedCollectionDate] = useState('');
-  const savedCartRef = useRef<{ lines: CartLine[]; payments: CartPayment[] }>({ lines: [], payments: [] });
+  const savedCartRef = useRef<{ lines: CartLine[]; payments: CartPayment[]; customerName: string | null }>({ lines: [], payments: [], customerName: null });
   const { user } = useAuthStore();
   const searchParams = useSearchParams();
   const fromQuoteId = searchParams.get('fromQuote');
@@ -140,6 +141,7 @@ function POSPageInner() {
       savedCartRef.current = {
         lines: [...lines],
         payments: [...payments.filter((p) => p.amount > 0)],
+        customerName,
       };
       setLastSale(res.data);
       setShowReceipt(true);
@@ -348,6 +350,7 @@ function POSPageInner() {
           sale={lastSale}
           cartLines={savedCartRef.current.lines}
           cartPayments={savedCartRef.current.payments}
+          customerName={savedCartRef.current.customerName}
           org={org}
           settings={settings}
           onClose={() => setShowReceipt(false)}
@@ -358,16 +361,18 @@ function POSPageInner() {
 }
 
 function ReceiptModal({
-  sale, cartLines, cartPayments, org, settings, onClose,
+  sale, cartLines, cartPayments, customerName, org, settings, onClose,
 }: {
   sale: Record<string, unknown>;
   cartLines: CartLine[];
   cartPayments: CartPayment[];
+  customerName: string | null;
   org?: Record<string, unknown>;
   settings?: Record<string, unknown>;
   onClose: () => void;
 }) {
   const print = usePrint();
+  const [docView, setDocView] = useState<'receipt' | 'collection'>('receipt');
 
   const receiptOrg: ReceiptOrg = {
     name: String(org?.['name'] ?? 'LEDGERA Business'),
@@ -391,7 +396,7 @@ function ReceiptModal({
     date: String(sale['date'] ?? new Date().toISOString()),
     cashierName: undefined,
     branchName: undefined,
-    customerName: undefined,
+    customerName: customerName ?? undefined,
     lines: cartLines.map((l) => ({
       name: l.name,
       quantity: l.quantity,
@@ -410,6 +415,24 @@ function ReceiptModal({
     payments: cartPayments.map((p) => ({ method: p.method, amount: p.amount })),
   };
 
+  const collectionNoteData: CollectionNoteData = {
+    storeRequestNumber: String(sale['storeRequestNumber'] ?? '—'),
+    saleNumber: String(sale['saleNumber']),
+    date: String(sale['date'] ?? new Date().toISOString()),
+    expectedCollectionDate: sale['expectedCollectionDate'] as string | undefined,
+    customerName: customerName ?? undefined,
+    status: 'pending',
+    // Freshly created — nothing has been handed over yet, so remaining
+    // always equals what was requested at the POS.
+    lines: cartLines.map((l) => ({
+      name: l.name,
+      sku: l.sku,
+      quantityRequested: l.quantity,
+      quantitySupplied: 0,
+      quantityRemaining: l.quantity,
+    })),
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[90vh] flex flex-col">
@@ -421,9 +444,31 @@ function ReceiptModal({
           </button>
         </div>
 
-        {/* Scrollable receipt area */}
-        <div className="flex-1 overflow-y-auto">
-          <PrintableReceipt org={receiptOrg} settings={receiptSettings} receipt={receiptData} />
+        {/* Document switcher — hidden during print */}
+        <div className="no-print flex gap-1 bg-slate-100 p-1 mx-5 mt-3 rounded-lg w-fit">
+          <button
+            onClick={() => setDocView('receipt')}
+            className={cn('px-3 py-1 text-xs rounded-md font-medium transition-colors',
+              docView === 'receipt' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+          >
+            Receipt
+          </button>
+          <button
+            onClick={() => setDocView('collection')}
+            className={cn('px-3 py-1 text-xs rounded-md font-medium transition-colors',
+              docView === 'collection' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700')}
+          >
+            Collection Note
+          </button>
+        </div>
+
+        {/* Scrollable printable area */}
+        <div className="flex-1 overflow-y-auto mt-2">
+          {docView === 'receipt' ? (
+            <PrintableReceipt org={receiptOrg} settings={receiptSettings} receipt={receiptData} />
+          ) : (
+            <PrintableCollectionNote org={receiptOrg} settings={receiptSettings} note={collectionNoteData} />
+          )}
         </div>
 
         {/* Action buttons — hidden during print */}
@@ -433,7 +478,7 @@ function ReceiptModal({
             className="flex items-center justify-center gap-2 border border-slate-200 rounded-lg py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             <Printer className="w-4 h-4" />
-            Print Receipt
+            Print {docView === 'receipt' ? 'Receipt' : 'Collection Note'}
           </button>
           <button
             onClick={onClose}

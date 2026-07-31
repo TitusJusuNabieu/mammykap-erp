@@ -120,11 +120,24 @@ const storeRequestsRoutes: FastifyPluginAsync = async (app) => {
       ? await req.db.select().from(storeRequestRejectionLines).where(inArray(storeRequestRejectionLines.storeRequestRejectionId, rejectionIds))
       : [];
 
+    // Lines only carry productId — the detail page (and the printable
+    // collection note) need a human-readable name, not a raw uuid.
+    const productIds = [...new Set(lines.map((l) => l.productId))];
+    const productRows = productIds.length
+      ? await req.db.select({ id: products.id, name: products.name, sku: products.sku })
+        .from(products).where(inArray(products.id, productIds))
+      : [];
+    const productMap = new Map(productRows.map((p) => [p.id, p]));
+
     return {
       data: {
         ...sr,
         sale,
-        lines,
+        lines: lines.map((l) => ({
+          ...l,
+          productName: productMap.get(l.productId)?.name ?? null,
+          sku: productMap.get(l.productId)?.sku ?? null,
+        })),
         supplies: supplies.map((s) => ({ ...s, lines: supplyLines.filter((l) => l.storeRequestSupplyId === s.id) })),
         rejections: rejections.map((r) => ({ ...r, lines: rejectionLines.filter((l) => l.storeRequestRejectionId === r.id) })),
       },

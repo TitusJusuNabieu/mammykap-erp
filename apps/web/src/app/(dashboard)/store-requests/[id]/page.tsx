@@ -3,15 +3,19 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, XCircle } from 'lucide-react';
-import { storeRequestsApi } from '@/lib/api';
+import { ArrowLeft, PackageCheck, XCircle, Printer, X } from 'lucide-react';
+import { api, storeRequestsApi } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { LoadingButton } from '@/components/ui/spinner';
+import { PrintableCollectionNote, type CollectionNoteData } from '@/components/print/PrintableCollectionNote';
+import { usePrint, type ReceiptOrg, type ReceiptSettings } from '@/components/print/PrintableReceipt';
 
 interface Line {
   id: string;
   productId: string;
+  productName: string | null;
+  sku: string | null;
   quantity: string;
   requestedUnitPrice: string;
   suppliedQuantity: string;
@@ -25,11 +29,15 @@ export default function StoreRequestDetailPage() {
   const [qtyOverrides, setQtyOverrides] = useState<Record<string, string>>({});
   const [rejectReason, setRejectReason] = useState('');
   const [showReject, setShowReject] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['store-request', id],
     queryFn: () => storeRequestsApi.get(id),
   });
+
+  const { data: orgData }      = useQuery({ queryKey: ['org'],          queryFn: () => api.get<{ data: Record<string, unknown> }>('/v1/org') });
+  const { data: settingsData } = useQuery({ queryKey: ['org-settings'], queryFn: () => api.get<{ data: Record<string, unknown> }>('/v1/org/settings') });
 
   const sr = data?.data as Record<string, unknown> | undefined;
   const lines = ((sr?.['lines'] as Line[]) ?? []);
@@ -89,9 +97,17 @@ export default function StoreRequestDetailPage() {
             Sale {sale?.['saleNumber'] as string} · Expected collection {formatDate(sr['expectedCollectionDate'] as string)}
           </p>
         </div>
-        <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-slate-100 text-slate-600 capitalize">
-          {(sr['status'] as string).replace('_', ' ')}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-slate-100 text-slate-600 capitalize">
+            {(sr['status'] as string).replace('_', ' ')}
+          </span>
+          <button
+            onClick={() => setShowPrint(true)}
+            className="flex items-center gap-1.5 text-sm border border-slate-200 rounded-lg px-3 py-1.5 text-slate-600 hover:bg-slate-50"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print
+          </button>
+        </div>
       </div>
 
       {/* Lines */}
@@ -109,7 +125,10 @@ export default function StoreRequestDetailPage() {
               const rem = remaining(l);
               return (
                 <tr key={l.id}>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-500">{l.productId.slice(0, 8)}</td>
+                  <td className="px-4 py-3">
+                    {l.productName ?? l.productId.slice(0, 8)}
+                    {l.sku && <span className="text-xs text-slate-400 ml-1.5">{l.sku}</span>}
+                  </td>
                   <td className="px-4 py-3">{l.quantity} @ {formatCurrency(l.requestedUnitPrice)}</td>
                   <td className="px-4 py-3 text-emerald-700">{l.suppliedQuantity}</td>
                   <td className="px-4 py-3 text-red-600">{l.rejectedQuantity}</td>
@@ -199,6 +218,84 @@ export default function StoreRequestDetailPage() {
           </div>
         </div>
       )}
+
+      {showPrint && (
+        <CollectionNotePrintModal
+          sr={sr}
+          sale={sale}
+          lines={lines}
+          org={orgData?.data}
+          settings={settingsData?.data}
+          onClose={() => setShowPrint(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function CollectionNotePrintModal({
+  sr, sale, lines, org, settings, onClose,
+}: {
+  sr: Record<string, unknown>;
+  sale?: Record<string, unknown>;
+  lines: Line[];
+  org?: Record<string, unknown>;
+  settings?: Record<string, unknown>;
+  onClose: () => void;
+}) {
+  const print = usePrint();
+
+  const noteOrg: ReceiptOrg = {
+    name: String(org?.['name'] ?? 'LEDGERA Business'),
+    address: org?.['address'] as string | undefined,
+    phone: org?.['phone'] as string | undefined,
+    email: org?.['email'] as string | undefined,
+    logoUrl: org?.['logoUrl'] as string | undefined,
+    tin: org?.['tin'] as string | undefined,
+  };
+
+  const noteSettings: ReceiptSettings = {
+    showLogoOnReceipt: settings?.['showLogoOnReceipt'] as boolean | undefined,
+    showTinOnReceipt: settings?.['showTinOnReceipt'] as boolean | undefined,
+  };
+
+  const noteData: CollectionNoteData = {
+    storeRequestNumber: String(sr['storeRequestNumber']),
+    saleNumber: String(sale?.['saleNumber'] ?? '—'),
+    date: String(sr['requestedAt'] ?? new Date().toISOString()),
+    expectedCollectionDate: sr['expectedCollectionDate'] as string | undefined,
+    status: sr['status'] as string,
+    lines: lines.map((l) => ({
+      name: l.productName ?? l.productId.slice(0, 8),
+      sku: l.sku,
+      quantityRequested: Number(l.quantity),
+      quantitySupplied: Number(l.suppliedQuantity),
+      quantityRemaining: Number(l.quantity) - Number(l.suppliedQuantity) - Number(l.rejectedQuantity),
+    })),
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full max-h-[90vh] flex flex-col">
+        <div className="no-print flex items-center justify-between px-5 py-4 border-b border-slate-100">
+          <p className="text-sm font-semibold text-slate-800">Collection Note</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          <PrintableCollectionNote org={noteOrg} settings={noteSettings} note={noteData} />
+        </div>
+        <div className="no-print p-4 border-t border-slate-100">
+          <button
+            onClick={() => print()}
+            className="w-full flex items-center justify-center gap-2 bg-brand-primary text-white rounded-lg py-2.5 text-sm font-medium hover:bg-brand-light"
+          >
+            <Printer className="w-4 h-4" />
+            Print Collection Note
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
